@@ -174,12 +174,15 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
             else:
                 oid = int(oid)
             try:
-                err = orders.set_order_delivered(oid)
+                err, inbound_id = orders.set_order_delivered_and_create_inbound(oid)
             except orders.OrderNotFound:
                 return (False, None, "주문을 찾을 수 없습니다.")
+            except Exception as e:
+                logger.warning("order_mark_delivered: 트랜잭션 실패 order_id=%s: %s", oid, e)
+                return (False, None, f"입고 등록 실패. 주문은 변경되지 않았습니다. ({e})")
             if err:
                 return (False, None, err)
-            return (True, {"order_id": oid}, "")
+            return (True, {"order_id": oid, "inbound_id": inbound_id}, "")
         # Worker CRUD는 admin 로그인 필수
         ok, err = _require_admin(body)
         if not ok:

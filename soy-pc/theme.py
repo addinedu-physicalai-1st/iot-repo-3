@@ -72,6 +72,7 @@ QPushButton:disabled {{
 }}
 QLabel {{
   color: {TEXT_PRIMARY};
+  background-color: transparent;
 }}
 QLineEdit {{
   background-color: {BG_CARD};
@@ -219,13 +220,14 @@ QWidget#WorkerScreen {{
   background-color: {BG_MAIN};
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar {{
-  background-color: {BG_CARD};
+  background-color: transparent;
   border-right: 1px solid {BORDER};
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar QLabel#label_worker_menuTitle {{
-  color: {TEXT_SECONDARY};
-  font-size: 11px;
+  color: {TEXT_PRIMARY};
+  font-size: 17px;
   font-weight: bold;
+  padding: 12px 0 8px 0;
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound {{
   background-color: transparent;
@@ -251,6 +253,21 @@ QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#backButton {{
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#backButton:hover {{
   background-color: {BORDER};
+}}
+/* 작업자 메인(환영) 화면 카드 */
+QWidget#WorkerScreen QFrame#welcome_card {{
+  background-color: {BG_CARD};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+}}
+QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_title {{
+  color: {TEXT_PRIMARY};
+  font-size: 28px;
+  font-weight: bold;
+}}
+QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_hint {{
+  color: {TEXT_SECONDARY};
+  font-size: 15px;
 }}
 
 /* ========== 관리자 화면 (사이드바 + 콘텐츠) ========== */

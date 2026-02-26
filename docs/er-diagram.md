@@ -67,8 +67,8 @@ erDiagram
     INBOUNDS {
         string inbound_id PK "입고번호"
         int order_id FK "발주 ID"
-        datetime inbound_date "입고 일시"
-        string status "WAITING, PROCESSING, COMPLETED"
+        datetime inbound_date "주문 QR 스캔으로 입고 등록된 일시"
+        string status "WAITING(order에서 생성 시 기본), PROCESSING, COMPLETED"
     }
 
     %% 분류 공정 작업
@@ -151,7 +151,7 @@ erDiagram
 | **PRODUCTS** | 요구 5 | 물품 마스터(item_code PK, 물품명, 브랜드, 종류, 용량) |
 | **ORDERS** | 요구 1 | 발주(발주 일자, status: PENDING/DELIVERED) |
 | **ORDER_ITEMS** | 요구 1 | 발주 상세(주문 물품 코드, 주문 수량) |
-| **INBOUNDS** | 요구 1 | 입고(입고번호 PK, 발주 ID, 입고 일시, status: WAITING/PROCESSING/COMPLETED) |
+| **INBOUNDS** | 요구 1 | 입고(입고번호 PK, 발주 ID, 주문 QR 스캔 시 입고 등록 일시, status: order 생성 시 기본 WAITING→PROCESSING→COMPLETED) |
 | **PROCESSES** | 요구 2 | 공정 작업(시작/종료 일시, status: RUNNING/PAUSED/COMPLETED/ERROR) |
 | **ITEM_SORTING_LOGS** | 요구 2 | 상자 단위 물품 인식·분류 로그(QR, item_code, 유통기한, 분류 판정, 오류 여부) |
 | **PROCESS_RESULTS** | 요구 3 | 공정 최종 결과(총 처리 수량, 1L/2L 정상, 미분류 수량) |
@@ -218,8 +218,8 @@ erDiagram
 |------|------|------|
 | inbound_id | VARCHAR(50) | PK (입고번호) |
 | order_id | INT UNSIGNED | FK → orders, NOT NULL |
-| inbound_date | DATETIME | NOT NULL (입고 일시) |
-| status | VARCHAR(20) | NOT NULL (WAITING, PROCESSING, COMPLETED) |
+| inbound_date | DATETIME | NOT NULL (주문 QR 스캔 시 입고 등록 일시) |
+| status | VARCHAR(20) | NOT NULL (order에서 생성 시 기본 WAITING, PROCESSING, COMPLETED) |
 
 ### processes (공정 작업)
 | 컬럼 | 타입 | 비고 |

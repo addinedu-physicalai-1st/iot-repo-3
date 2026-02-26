@@ -1,10 +1,11 @@
-"""작업자 화면 — 돌아가기, 입고관리(카메라 QR 스캔 → 주문 delivered)."""
+"""작업자 화면 — 돌아가기, 주문 관리(송장 QR 스캔 → 주문 delivered, inbound 기록)."""
 import json
 import logging
 from typing import Any
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import QFrame
 
 from api import order_mark_delivered
 
@@ -92,7 +93,7 @@ def _parse_qr_payload(data: str) -> dict[str, Any] | None:
 
 
 def setup_worker_screen(window, stacked) -> None:
-    """작업자 화면: 사이드바(입고관리 메뉴), 입고관리 페이지(카메라 QR → 주문 delivered)."""
+    """작업자 화면: 사이드바(주문 관리 메뉴), 주문 관리 페이지(송장 QR → 주문 delivered)."""
     worker = window.page_worker
 
     def back_to_lock():
@@ -100,10 +101,27 @@ def setup_worker_screen(window, stacked) -> None:
 
     worker.backButton.clicked.connect(back_to_lock)
 
-    # 입고관리 메뉴만 있으므로 스택 전환은 필요 없음. 메뉴 버튼은 체크 상태만 유지.
-    worker.menu_inbound.setChecked(True)
+    # 기본 페이지: 환영 화면(page_welcome). 주문 관리 클릭 시 page_inbound로 전환.
+    stack = worker.worker_content_stack
+    stack.setCurrentIndex(0)  # page_welcome
 
-    # ----- 입고관리 페이지: 카메라 + QR 스캔 -----
+    # .ui 로더가 contentsMargins 4값을 처리하지 못하므로 Python에서 설정
+    welcome_page = stack.widget(0)
+    if welcome_page.layout():
+        welcome_page.layout().setContentsMargins(32, 32, 32, 32)
+    card = worker.findChild(QFrame, "welcome_card")
+    if card and card.layout():
+        card.layout().setContentsMargins(40, 40, 40, 40)
+
+    def on_menu_inbound_clicked():
+        if worker.menu_inbound.isChecked():
+            stack.setCurrentIndex(1)  # page_inbound
+        else:
+            stack.setCurrentIndex(0)  # page_welcome
+
+    worker.menu_inbound.clicked.connect(on_menu_inbound_clicked)
+
+    # ----- 주문 관리 페이지: 카메라 + 송장 QR 스캔 -----
     camera_thread: CameraQRThread | None = None
     scan_active = False
 
@@ -183,4 +201,22 @@ def setup_worker_screen(window, stacked) -> None:
         except Exception:
             pass
 
+    def stop_camera_if_switching_to_welcome(index: int):
+        nonlocal scan_active, camera_thread
+        if index != 1 and scan_active:  # 1 = page_inbound
+            try:
+                if camera_thread and camera_thread.isRunning():
+                    camera_thread.stop()
+                    camera_thread.wait(2000)
+                scan_active = False
+                worker.cameraPreview.clear()
+                worker.cameraPreview.setText("카메라 미리보기")
+                worker.scanToggleButton.setText("QR 스캔 시작")
+                worker.inboundResultLabel.setText(
+                    "송장 QR을 카메라에 비춰 주세요. 스캔 시작 버튼을 누른 뒤 QR을 인식하면 자동으로 입고 처리됩니다."
+                )
+            except Exception:
+                pass
+
     stacked.currentChanged.connect(lambda _: stop_camera_if_leaving())
+    stack.currentChanged.connect(stop_camera_if_switching_to_welcome)

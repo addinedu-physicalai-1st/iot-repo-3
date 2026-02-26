@@ -337,7 +337,7 @@ def delete_worker(worker_id: int) -> None:
         raise RuntimeError(err or "delete_worker failed")
 
 
-# ----- 주문/입고 (작업자 화면 입고관리, 인증 불필요) -----
+# ----- 주문/입고 (작업자 화면 주문 관리, 인증 불필요) -----
 
 
 def get_order(order_id: int) -> dict:
