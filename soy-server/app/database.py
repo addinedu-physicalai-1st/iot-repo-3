@@ -43,7 +43,7 @@ def get_session_factory() -> sessionmaker[Session]:
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(
             autocommit=False,
-            autoflush=False,
+            autoflush=True,
             bind=get_engine(),
         )
     return _SessionLocal
@@ -51,7 +51,11 @@ def get_session_factory() -> sessionmaker[Session]:
 
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
-    """ORM 세션 컨텍스트. yield 후 commit(정상) 또는 rollback(예외)."""
+    """
+    ORM 세션 컨텍스트. 한 번의 with 블록 = 한 트랜잭션.
+    - 정상 종료: session.commit() → 트랜잭션 커밋 (모든 변경 한 번에 반영).
+    - 예외 시: session.rollback() → 트랜잭션 롤백 (모든 변경 취소).
+    """
     session = get_session_factory()()
     try:
         yield session

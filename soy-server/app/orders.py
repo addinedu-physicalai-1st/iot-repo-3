@@ -60,10 +60,16 @@ def set_order_delivered_and_create_inbound(
     """
     주문을 DELIVERED로 바꾸고 inbounds에 1건 추가. 한 트랜잭션으로 처리하며,
     inbound INSERT 실패 시 orders 변경도 롤백되어 PENDING 유지.
+
+    트랜잭션 경계: 아래 with get_session() 블록 전체가 하나의 트랜잭션.
+    - 블록 안의 order UPDATE와 inbound INSERT는 같은 session에서 실행됨.
+    - 블록 정상 종료 시 get_session()이 commit() 한 번 호출 → 둘 다 반영.
+    - 블록 안에서 예외 시 get_session()이 rollback() → 둘 다 취소.
+
     반환: (에러 메시지, inbound_id). 성공 시 (None, inbound_id), 실패 시 (에러문구, None).
     없으면 OrderNotFound.
     """
-    with get_session() as session:
+    with get_session() as session:  # 트랜잭션 시작 (commit/rollback은 get_session이 처리)
         order = session.get(Order, order_id)
         if not order:
             raise OrderNotFound()
@@ -72,6 +78,7 @@ def set_order_delivered_and_create_inbound(
         now = datetime.utcnow()
         inbound_id = f"IN-{order_id}-{now.strftime('%Y%m%d%H%M%S')}"
         order.status = "DELIVERED"
+        session.flush()
         inbound = Inbound(
             inbound_id=inbound_id,
             order_id=order_id,
@@ -79,5 +86,7 @@ def set_order_delivered_and_create_inbound(
             status="WAITING",
         )
         session.add(inbound)
+        session.flush()
+        # 여기서 with 블록 종료 → get_session()이 commit() 호출 → order UPDATE + inbound INSERT 한 번에 반영
     logger.info("order_id=%s delivered, inbound_id=%s", order_id, inbound_id)
     return (None, inbound_id)
