@@ -58,8 +58,8 @@ class Order(Base):
     order_items: Mapped[list["OrderItem"]] = relationship(
         "OrderItem", back_populates="order", cascade="all, delete-orphan"
     )
-    inbounds: Mapped[list["Inbound"]] = relationship(
-        "Inbound", back_populates="order"
+    processes: Mapped[list["Process"]] = relationship(
+        "Process", back_populates="order"
     )
 
 
@@ -78,14 +78,21 @@ class OrderItem(Base):
     order: Mapped["Order"] = relationship("Order", back_populates="order_items")
 
 
-class Inbound(Base):
-    __tablename__ = "inbounds"
+class Process(Base):
+    __tablename__ = "processes"
 
-    inbound_id: Mapped[str] = mapped_column("inbound_id", String(50), primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        "process_id", Integer, primary_key=True, autoincrement=True
+    )
     order_id: Mapped[int] = mapped_column(
         "order_id", Integer, ForeignKey("orders.order_id", ondelete="RESTRICT"), nullable=False
     )
-    inbound_date: Mapped[datetime] = mapped_column("inbound_date", DateTime, nullable=False)
+    start_time: Mapped[datetime | None] = mapped_column("start_time", DateTime, nullable=True)
+    end_time: Mapped[datetime | None] = mapped_column("end_time", DateTime, nullable=True)
     status: Mapped[str] = mapped_column("status", String(20), nullable=False)
+    total_qty: Mapped[int] = mapped_column("total_qty", Integer, nullable=False, default=0)
+    success_1l_qty: Mapped[int] = mapped_column("success_1l_qty", Integer, nullable=False, default=0)
+    success_2l_qty: Mapped[int] = mapped_column("success_2l_qty", Integer, nullable=False, default=0)
+    unclassified_qty: Mapped[int] = mapped_column("unclassified_qty", Integer, nullable=False, default=0)
 
-    order: Mapped["Order"] = relationship("Order", back_populates="inbounds")
+    order: Mapped["Order"] = relationship("Order", back_populates="processes")

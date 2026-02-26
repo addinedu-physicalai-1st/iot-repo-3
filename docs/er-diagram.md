@@ -8,9 +8,9 @@ SYSTEM_REQUIREMENTS.md 기반 DB 스키마 개념 설계.
 
 | 요구 | 설명 | 사용 테이블·컬럼 |
 |------|------|------------------|
-| **1. 발주·입고** | 발주 등록 후 배송 완료 시 입고 | `ORDERS`, `ORDER_ITEMS`, `INBOUNDS` (order_id FK, status: WAITING→PROCESSING→COMPLETED) |
-| **2. 공정·분류** | 입고 건을 공정에 할당, 상자 단위 QR 인식·분류 | `PROCESSES`, `ITEM_SORTING_LOGS` (process_id, inbound_id, item_code, sorted_inventory, is_error) |
-| **3. 공정 결과·알림** | 공정 종료 시 최종 수량, 미분류/오류 등 경고 | `PROCESS_RESULTS`, `ALERTS` (process_id FK) |
+| **1. 발주·입고** | 발주 등록 후 배송 완료 시 QR 인식으로 공정 생성 | `ORDERS`, `ORDER_ITEMS`, `PROCESSES` (order_id FK, QR 인식 시 process 1건 추가) |
+| **2. 공정·분류** | 주문 QR 인식 시 공정 1건 생성, 상자 단위 QR 인식·분류 | `PROCESSES`, `ITEM_SORTING_LOGS` (process_id, order_id FK, item_code, sorted_inventory, is_error) |
+| **3. 공정 결과·알림** | 공정 종료 시 최종 수량, 미분류/오류 등 경고 | `PROCESSES` (total_qty, success_1l_qty, success_2l_qty, unclassified_qty), `ALERTS` (process_id FK) |
 | **4. 창고 재고** | 창고별 현재 재고 수량 | `INVENTORY` (inventory_name, current_qty, updated_at) |
 | **5. 물품 마스터** | 물품 코드·명·브랜드·종류·용량 | `PRODUCTS` (item_code PK, name, brand, category, capacity) |
 
@@ -64,43 +64,29 @@ erDiagram
         int expected_qty "주문 수량"
     }
 
-    INBOUNDS {
-        string inbound_id PK "입고번호"
-        int order_id FK "발주 ID"
-        datetime inbound_date "주문 QR 스캔으로 입고 등록된 일시"
-        string status "WAITING(order에서 생성 시 기본), PROCESSING, COMPLETED"
-    }
-
-    %% 분류 공정 작업
+    %% 분류 공정 작업 (주문 QR 인식 시 1건 생성, 공정 실제 시작 시 start_time 설정)
     PROCESSES {
         int process_id PK "공정 작업 ID"
-        datetime start_time "공정 시작 일시"
+        int order_id FK "발주 ID"
+        datetime start_time "공정 시작 일시 (공정 시작 시 설정, orders가 아님)"
         datetime end_time "공정 종료 일시"
-        string status "RUNNING, PAUSED, COMPLETED, ERROR"
+        string status "NOT_STARTED, RUNNING, PAUSED, COMPLETED, ERROR"
+        int total_qty "총 처리 수량"
+        int success_1l_qty "1L 정상 분류 수량"
+        int success_2l_qty "2L 정상 분류 수량"
+        int unclassified_qty "미분류 수량"
     }
 
     %% 물품 인식 및 분류 판정 로그 (상자 단위)
     ITEM_SORTING_LOGS {
         int log_id PK "물품 인식 로그 ID"
         int process_id FK "공정 작업 ID"
-        string inbound_id FK "해당 물품의 입고번호"
         string box_qr_code "상자 부착 QR 정보"
         string item_code FK "인식된 물품 코드"
         date expiration_date "인식된 유통기한"
         string sorted_inventory FK "분류 판정"
         boolean is_error "오류 여부(미인식, 오분류 등)"
         datetime timestamp "인식 일시"
-    }
-
-    %% 공정 최종 결과 로그
-    PROCESS_RESULTS {
-        int result_id PK "결과 로그 ID"
-        int process_id FK "공정 작업 ID"
-        int total_qty "총 처리 수량"
-        int success_1l_qty "1L 정상 분류 수량"
-        int success_2l_qty "2L 정상 분류 수량"
-        int unclassified_qty "미분류 수량"
-        datetime created_at "결과 생성 일시"
     }
 
     %% 시스템 알림/경고 이력
@@ -125,15 +111,12 @@ erDiagram
     workers ||--o{ access_logs : "출입 (1:N)"
 
     ORDERS ||--|{ ORDER_ITEMS : "발주 상세 포함"
-    ORDERS ||--o| INBOUNDS : "배송완료 시 자동 입고"
+    ORDERS ||--o{ PROCESSES : "QR 인식 시 공정 1건 생성"
 
     PRODUCTS ||--o{ ORDER_ITEMS : "발주 품목 참조"
     PRODUCTS ||--o{ ITEM_SORTING_LOGS : "QR 인식품목 참조"
 
-    INBOUNDS ||--|{ PROCESSES : "공정에 할당됨"
-
     PROCESSES ||--o{ ITEM_SORTING_LOGS : "상자 단위 판정 로그 생성"
-    PROCESSES ||--|| PROCESS_RESULTS : "종료 시 최종 결과 로그 생성"
     PROCESSES ||--o{ ALERTS : "시스템 경고 발생"
 
     INVENTORY ||--|{ ITEM_SORTING_LOGS : "분류된 물품 적재"
@@ -151,10 +134,8 @@ erDiagram
 | **PRODUCTS** | 요구 5 | 물품 마스터(item_code PK, 물품명, 브랜드, 종류, 용량) |
 | **ORDERS** | 요구 1 | 발주(발주 일자, status: PENDING/DELIVERED) |
 | **ORDER_ITEMS** | 요구 1 | 발주 상세(주문 물품 코드, 주문 수량) |
-| **INBOUNDS** | 요구 1 | 입고(입고번호 PK, 발주 ID, 주문 QR 스캔 시 입고 등록 일시, status: order 생성 시 기본 WAITING→PROCESSING→COMPLETED) |
-| **PROCESSES** | 요구 2 | 공정 작업(시작/종료 일시, status: RUNNING/PAUSED/COMPLETED/ERROR) |
-| **ITEM_SORTING_LOGS** | 요구 2 | 상자 단위 물품 인식·분류 로그(QR, item_code, 유통기한, 분류 판정, 오류 여부) |
-| **PROCESS_RESULTS** | 요구 3 | 공정 최종 결과(총 처리 수량, 1L/2L 정상, 미분류 수량) |
+| **PROCESSES** | 요구 1, 2, 3 | 공정 작업(order_id FK, QR 인식 시 1건 생성, 시작/종료 일시, status, 종료 시 total_qty/success_1l_qty/success_2l_qty/unclassified_qty 갱신) |
+| **ITEM_SORTING_LOGS** | 요구 2 | 상자 단위 물품 인식·분류 로그(process_id, QR, item_code, 유통기한, 분류 판정, 오류 여부) |
 | **ALERTS** | 요구 3 | 시스템 알림/경고(공정 ID, 유형, 메시지) |
 | **INVENTORY** | 요구 4 | 창고 재고(창고 이름, 현재 수량, 마지막 업데이트) |
 
@@ -213,45 +194,30 @@ erDiagram
 | item_code | VARCHAR(50) | FK → products, NOT NULL |
 | expected_qty | INT UNSIGNED | NOT NULL (주문 수량) |
 
-### inbounds (입고)
-| 컬럼 | 타입 | 비고 |
-|------|------|------|
-| inbound_id | VARCHAR(50) | PK (입고번호) |
-| order_id | INT UNSIGNED | FK → orders, NOT NULL |
-| inbound_date | DATETIME | NOT NULL (주문 QR 스캔 시 입고 등록 일시) |
-| status | VARCHAR(20) | NOT NULL (order에서 생성 시 기본 WAITING, PROCESSING, COMPLETED) |
-
 ### processes (공정 작업)
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
 | process_id | INT UNSIGNED | PK, AUTO_INCREMENT |
-| start_time | DATETIME | NOT NULL |
+| order_id | INT UNSIGNED | FK → orders, NOT NULL (QR 인식 시 해당 발주와 연결) |
+| start_time | DATETIME | NULL (공정 실제 시작 시 설정, orders 생성 시에는 미설정) |
 | end_time | DATETIME | NULL |
-| status | VARCHAR(20) | NOT NULL (RUNNING, PAUSED, COMPLETED, ERROR) |
+| status | VARCHAR(20) | NOT NULL (NOT_STARTED, RUNNING, PAUSED, COMPLETED, ERROR) |
+| total_qty | INT UNSIGNED | NOT NULL, DEFAULT 0 (총 처리 수량, 종료 시 갱신) |
+| success_1l_qty | INT UNSIGNED | NOT NULL, DEFAULT 0 (1L 정상 분류 수량) |
+| success_2l_qty | INT UNSIGNED | NOT NULL, DEFAULT 0 (2L 정상 분류 수량) |
+| unclassified_qty | INT UNSIGNED | NOT NULL, DEFAULT 0 (미분류 수량) |
 
 ### item_sorting_logs (물품 인식·분류 로그)
 | 컬럼 | 타입 | 비고 |
 |------|------|------|
 | log_id | INT UNSIGNED | PK, AUTO_INCREMENT |
 | process_id | INT UNSIGNED | FK → processes, NOT NULL |
-| inbound_id | VARCHAR(50) | FK → inbounds, NOT NULL |
 | box_qr_code | VARCHAR(255) | NULL (상자 QR 정보) |
 | item_code | VARCHAR(50) | FK → products, NULL (인식된 물품 코드) |
 | expiration_date | DATE | NULL (인식된 유통기한) |
 | sorted_inventory | VARCHAR(50) | NULL (분류 판정, 창고/인벤토리 참조) |
 | is_error | TINYINT(1) | NOT NULL, DEFAULT 0 (미인식·오분류 등) |
 | timestamp | DATETIME | NOT NULL (인식 일시) |
-
-### process_results (공정 최종 결과)
-| 컬럼 | 타입 | 비고 |
-|------|------|------|
-| result_id | INT UNSIGNED | PK, AUTO_INCREMENT |
-| process_id | INT UNSIGNED | FK → processes, NOT NULL, UNIQUE (1:1) |
-| total_qty | INT UNSIGNED | NOT NULL |
-| success_1l_qty | INT UNSIGNED | NOT NULL |
-| success_2l_qty | INT UNSIGNED | NOT NULL |
-| unclassified_qty | INT UNSIGNED | NOT NULL |
-| created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP |
 
 ### alerts (시스템 알림/경고)
 | 컬럼 | 타입 | 비고 |

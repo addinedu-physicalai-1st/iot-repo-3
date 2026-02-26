@@ -174,7 +174,7 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
             else:
                 oid = int(oid)
             try:
-                err, inbound_id = orders.set_order_delivered_and_create_inbound(oid)
+                err, process_id = orders.set_order_delivered_and_create_process(oid)
             except orders.OrderNotFound:
                 return (False, None, "주문을 찾을 수 없습니다.")
             except Exception as e:
@@ -182,7 +182,7 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
                 return (False, None, f"입고 등록 실패. 주문은 변경되지 않았습니다. ({e})")
             if err:
                 return (False, None, err)
-            return (True, {"order_id": oid, "inbound_id": inbound_id}, "")
+            return (True, {"order_id": oid, "process_id": process_id}, "")
         # Worker CRUD는 admin 로그인 필수
         ok, err = _require_admin(body)
         if not ok:
