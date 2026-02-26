@@ -335,3 +335,40 @@ def delete_worker(worker_id: int) -> None:
         if "not found" in (err or "").lower() or "찾을 수 없" in (err or ""):
             raise WorkerNotFound()
         raise RuntimeError(err or "delete_worker failed")
+
+
+# ----- 주문/입고 (작업자 화면 입고관리, 인증 불필요) -----
+
+
+def get_order(order_id: int) -> dict:
+    """주문 조회. 없으면 RuntimeError."""
+    ok, body, err = _request("get_order", {"order_id": order_id})
+    if not ok:
+        raise RuntimeError(err or "주문 조회 실패")
+    return body or {}
+
+
+def get_order_id_by_order_item_id(order_item_id: int) -> int:
+    """order_item_id로 order_id 조회. 없으면 RuntimeError."""
+    ok, body, err = _request("get_order_id_by_order_item_id", {"order_item_id": order_item_id})
+    if not ok:
+        raise RuntimeError(err or "주문 상세 조회 실패")
+    if body and isinstance(body, dict) and "order_id" in body:
+        return int(body["order_id"])
+    raise RuntimeError("order_id not in response")
+
+
+def order_mark_delivered(*, order_id: int | None = None, order_item_id: int | None = None) -> dict:
+    """주문을 입고 처리(pending → delivered). order_id 또는 order_item_id 중 하나 지정.
+    이미 delivered면 RuntimeError(메시지에 '이미 입고한 주문')."""
+    body: dict[str, Any] = {}
+    if order_id is not None:
+        body["order_id"] = order_id
+    if order_item_id is not None:
+        body["order_item_id"] = order_item_id
+    if not body:
+        raise ValueError("order_id 또는 order_item_id 필요")
+    ok, res, err = _request("order_mark_delivered", body)
+    if not ok:
+        raise RuntimeError(err or "입고 처리 실패")
+    return res or {}

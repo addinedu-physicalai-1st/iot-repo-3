@@ -17,7 +17,7 @@ MAX_FRAME_PAYLOAD = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
-from app import workers
+from app import orders, workers
 from app.auth import create_first_admin, verify_admin_password
 
 # 환경변수
@@ -145,6 +145,41 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
                 return (True, None, "")
             except ValueError as e:
                 return (False, None, str(e))
+        # 주문/입고 (작업자 화면 입고관리, 인증 불필요)
+        if action == "get_order":
+            oid = body.get("order_id")
+            if oid is None:
+                return (False, None, "order_id required")
+            order = orders.get_order(int(oid))
+            if order is None:
+                return (False, None, "주문을 찾을 수 없습니다.")
+            return (True, order, "")
+        if action == "get_order_id_by_order_item_id":
+            oiid = body.get("order_item_id")
+            if oiid is None:
+                return (False, None, "order_item_id required")
+            oid = orders.get_order_id_by_order_item_id(int(oiid))
+            if oid is None:
+                return (False, None, "주문 상세를 찾을 수 없습니다.")
+            return (True, {"order_id": oid}, "")
+        if action == "order_mark_delivered":
+            oid = body.get("order_id")
+            oiid = body.get("order_item_id")
+            if oid is None and oiid is None:
+                return (False, None, "order_id 또는 order_item_id가 필요합니다.")
+            if oid is None:
+                oid = orders.get_order_id_by_order_item_id(int(oiid))
+                if oid is None:
+                    return (False, None, "주문 상세를 찾을 수 없습니다.")
+            else:
+                oid = int(oid)
+            try:
+                err = orders.set_order_delivered(oid)
+            except orders.OrderNotFound:
+                return (False, None, "주문을 찾을 수 없습니다.")
+            if err:
+                return (False, None, err)
+            return (True, {"order_id": oid}, "")
         # Worker CRUD는 admin 로그인 필수
         ok, err = _require_admin(body)
         if not ok:
@@ -183,6 +218,8 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
         return (False, None, "Worker not found")
     except workers.WorkerCreateConflict as e:
         return (False, None, e.detail)
+    except orders.OrderNotFound:
+        return (False, None, "주문을 찾을 수 없습니다.")
     except Exception as e:
         return (False, None, str(e))
 
