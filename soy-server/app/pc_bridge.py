@@ -1,15 +1,19 @@
 """
 Soy-PC 브릿지: 시리얼 수신(Register Controller) + TCP 서버(요청/응답 + card_read 푸시).
 Worker CRUD는 admin 로그인(세션 토큰) 후에만 허용.
-NDJSON 한 줄 = JSON, UTF-8, LF.
+TCP: 길이 프리픽스 프레임 [4바이트 BE 길이][payload UTF-8 JSON]. Serial은 NDJSON(LF).
 """
 import json
 import logging
 import os
 import socket
+import struct
 import threading
 import uuid
 from typing import Any
+
+# TCP 프레임: 헤더 4바이트(big-endian uint32) = payload 바이트 수, 이후 payload. 최대 1MB.
+MAX_FRAME_PAYLOAD = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +37,48 @@ _sessions: dict[str, int] = {}
 _sessions_lock = threading.Lock()
 
 
+def _read_exact(sock: socket.socket, n: int) -> bytes | None:
+    """소켓에서 정확히 n바이트 읽기. 연결 끊김/오류 시 None."""
+    buf = b""
+    while len(buf) < n:
+        try:
+            chunk = sock.recv(min(4096, n - len(buf)))
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            return None
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
+def _read_frame(sock: socket.socket) -> bytes | None:
+    """헤더(4바이트) 읽고 payload 길이만큼 읽어 반환. 끊김/오류/초과 시 None."""
+    header = _read_exact(sock, 4)
+    if header is None or len(header) != 4:
+        return None
+    (length,) = struct.unpack(">I", header)
+    if length == 0 or length > MAX_FRAME_PAYLOAD:
+        return None
+    return _read_exact(sock, length)
+
+
+def _send_frame(sock: socket.socket, payload: bytes) -> bool:
+    """payload 앞에 4바이트 길이 헤더 붙여 전송. 실패 시 False."""
+    try:
+        sock.sendall(struct.pack(">I", len(payload)) + payload)
+        return True
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return False
+
+
 def _broadcast_card_read(line: str) -> None:
-    """card_read NDJSON 한 줄을 모든 연결된 클라이언트에 전송."""
-    data = (line.strip() + "\n").encode("utf-8")
+    """card_read JSON을 길이 프리픽스 프레임으로 모든 TCP 클라이언트에 전송."""
+    payload = line.strip().encode("utf-8")
     with _clients_lock:
         n = len(_clients)
         dead = []
         for sock in _clients:
-            try:
-                sock.sendall(data)
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            if not _send_frame(sock, payload):
                 dead.append(sock)
         for sock in dead:
             _clients.discard(sock)
@@ -152,43 +188,32 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
 
 
 def _handle_client(sock: socket.socket) -> None:
-    """한 클라이언트의 요청 루프."""
+    """한 클라이언트의 요청 루프. 길이 프리픽스 프레임으로 수신/송신."""
     try:
-        buf = b""
         while not _stop.is_set():
+            payload = _read_frame(sock)
+            if payload is None:
+                break
             try:
-                chunk = sock.recv(4096)
-            except (ConnectionResetError, BrokenPipeError, OSError):
+                msg = json.loads(payload.decode("utf-8", errors="strict"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(msg, dict) or msg.get("type") != "request":
+                continue
+            req_id = msg.get("id")
+            action = msg.get("action", "")
+            body = msg.get("body") or {}
+            ok, res_body, err = _handle_request(action, body)
+            resp = {
+                "type": "response",
+                "id": req_id,
+                "ok": ok,
+                "body": res_body,
+                "error": err if not ok else None,
+            }
+            resp_bytes = json.dumps(resp, ensure_ascii=False).encode("utf-8")
+            if not _send_frame(sock, resp_bytes):
                 break
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line_str = line.decode("utf-8", errors="ignore").strip()
-                if not line_str:
-                    continue
-                try:
-                    msg = json.loads(line_str)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(msg, dict) or msg.get("type") != "request":
-                    continue
-                req_id = msg.get("id")
-                action = msg.get("action", "")
-                body = msg.get("body") or {}
-                ok, res_body, err = _handle_request(action, body)
-                resp = {
-                    "type": "response",
-                    "id": req_id,
-                    "ok": ok,
-                    "body": res_body,
-                    "error": err if not ok else None,
-                }
-                try:
-                    sock.sendall((json.dumps(resp, ensure_ascii=False) + "\n").encode("utf-8"))
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    break
     finally:
         with _clients_lock:
             _clients.discard(sock)

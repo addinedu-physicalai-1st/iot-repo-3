@@ -41,7 +41,11 @@
 ## SoyServer ↔ Soy-PC (TCP)
 
 - **연결**: Soy-PC가 SoyServer의 TCP 포트(기본 9001)에 접속. 한 연결로 요청/응답 + card_read 푸시.
-- **프로토콜**: NDJSON (한 줄 = JSON, UTF-8, LF).
+- **프로토콜**: **길이 프리픽스 프레임**. 스트림에서 `\n` 스캔 없이 한 메시지 단위로 빠르게 읽기.
+  - **프레임 형식**: `[4바이트 big-endian uint32 = payload 길이][payload]`
+  - **payload**: UTF-8 인코딩된 JSON 한 개. (요청/응답/card_read 동일)
+  - **최대 payload 크기**: 1MB. 그 이상은 무시/연결 종료.
+  - **예**: payload 10바이트면 `\x00\x00\x00\x0a` + 10바이트 전송.
 
 ### PC → 서버 (요청)
 

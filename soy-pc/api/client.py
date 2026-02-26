@@ -1,13 +1,18 @@
 """
 soy-server TCP 클라이언트. Worker CRUD + card_read 푸시 수신.
 환경변수: SOY_SERVER_HOST(기본 127.0.0.1), SOY_SERVER_TCP_PORT(기본 9001).
+TCP: 길이 프리픽스 프레임 [4바이트 BE 길이][payload UTF-8 JSON].
 """
 import json
 import logging
 import os
 import socket
+import struct
 import threading
 from typing import Any, Callable
+
+# 서버와 동일: 헤더 4바이트(big-endian uint32) = payload 길이. 최대 1MB.
+MAX_FRAME_PAYLOAD = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,40 @@ def _next_id() -> int:
     with _id_lock:
         _request_id += 1
         return _request_id
+
+
+def _read_exact(s: socket.socket, n: int) -> bytes | None:
+    """소켓에서 정확히 n바이트 읽기. 끊김/오류 시 None."""
+    buf = b""
+    while len(buf) < n:
+        try:
+            chunk = s.recv(min(4096, n - len(buf)))
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            return None
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
+def _read_frame(s: socket.socket) -> bytes | None:
+    """헤더(4바이트) 읽고 payload 길이만큼 읽어 반환. 끊김/오류/초과 시 None."""
+    header = _read_exact(s, 4)
+    if header is None or len(header) != 4:
+        return None
+    (length,) = struct.unpack(">I", header)
+    if length == 0 or length > MAX_FRAME_PAYLOAD:
+        return None
+    return _read_exact(s, length)
+
+
+def _send_frame(s: socket.socket, payload: bytes) -> bool:
+    """payload 앞에 4바이트 길이 헤더 붙여 전송. 실패 시 False."""
+    try:
+        s.sendall(struct.pack(">I", len(payload)) + payload)
+        return True
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return False
 
 
 def _ensure_connected() -> socket.socket:
@@ -100,59 +139,45 @@ def _ensure_connected() -> socket.socket:
 
 
 def _reader_loop() -> None:
-    """한 줄씩 읽어 response면 pending에 넣고, card_read면 콜백. buf는 유지해 잘린 메시지 손실 방지."""
+    """길이 프리픽스 프레임으로 한 메시지씩 읽어 response면 pending에, card_read면 콜백."""
     global _socket
-    buf = b""
     while _reader_running.is_set():
         try:
             s = _socket
             if s is None:
                 break
-            try:
-                chunk = s.recv(4096)
-            except (ConnectionResetError, BrokenPipeError, OSError):
-                chunk = b""
-            if not chunk:
+            payload = _read_frame(s)
+            if payload is None:
                 break
-            buf += chunk
-            # 한 줄씩 처리 (나머지는 buf에 유지)
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line_str = line.decode("utf-8", errors="ignore").strip()
-                if not line_str:
-                    continue
-                try:
-                    msg = json.loads(line_str)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(msg, dict):
-                    continue
-                if msg.get("type") == "response":
-                    rid = msg.get("id")
-                    ok = msg.get("ok", False)
-                    body = msg.get("body")
-                    err = msg.get("error") or ""
-                    with _pending_lock:
-                        if rid in _pending:
-                            ev, res = _pending.pop(rid)
-                            res.append((ok, body, err))
-                            ev.set()
-                elif msg.get("type") == "card_read":
-                    uid = msg.get("uid") or ""
-                    logger.info("[RFID] card_read received from server uid=%r callback=%s", uid, _card_read_callback is not None)
-                    if uid and _card_read_callback:
-                        try:
-                            _card_read_callback(uid)
-                            logger.info("[RFID] card_read callback done uid=%r", uid)
-                        except Exception as e:
-                            logger.warning("[RFID] card_read callback error: %s", e)
-                    elif not uid:
-                        logger.warning("[RFID] card_read ignored: uid empty")
-                    else:
-                        logger.warning("[RFID] card_read ignored: no callback registered")
-            # 버퍼 비정상 증가 방지 (한 줄은 보통 수백 바이트 미만)
-            if len(buf) > 65536:
-                buf = b""
+            try:
+                msg = json.loads(payload.decode("utf-8", errors="strict"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("type") == "response":
+                rid = msg.get("id")
+                ok = msg.get("ok", False)
+                body = msg.get("body")
+                err = msg.get("error") or ""
+                with _pending_lock:
+                    if rid in _pending:
+                        ev, res = _pending.pop(rid)
+                        res.append((ok, body, err))
+                        ev.set()
+            elif msg.get("type") == "card_read":
+                uid = msg.get("uid") or ""
+                logger.info("[RFID] card_read received from server uid=%r callback=%s", uid, _card_read_callback is not None)
+                if uid and _card_read_callback:
+                    try:
+                        _card_read_callback(uid)
+                        logger.info("[RFID] card_read callback done uid=%r", uid)
+                    except Exception as e:
+                        logger.warning("[RFID] card_read callback error: %s", e)
+                elif not uid:
+                    logger.warning("[RFID] card_read ignored: uid empty")
+                else:
+                    logger.warning("[RFID] card_read ignored: no callback registered")
         except Exception:
             break
     with _socket_lock:
@@ -208,7 +233,9 @@ def _request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
     try:
         sock = _ensure_connected()
         req = {"type": "request", "id": req_id, "action": action, "body": body}
-        sock.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
+        payload = json.dumps(req, ensure_ascii=False).encode("utf-8")
+        if not _send_frame(sock, payload):
+            raise ConnectionError("Send failed")
     except Exception as e:
         with _pending_lock:
             _pending.pop(req_id, None)
