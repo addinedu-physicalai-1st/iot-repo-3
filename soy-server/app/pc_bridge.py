@@ -218,8 +218,8 @@ def _serial_loop() -> None:
         logger.info(msg)
         print(msg, flush=True)
     except Exception as e:
-        msg = f"[Serial] failed to open {SERIAL_PORT}: {e}"
-        logger.error(msg)
+        msg = f"[Serial] port unavailable (worker registration disabled): {SERIAL_PORT} — {e}"
+        logger.warning(msg)
         print(msg, flush=True)
         return
     try:

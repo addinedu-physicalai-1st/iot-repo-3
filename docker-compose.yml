@@ -1,5 +1,6 @@
 # SoyFactory — MySQL(SoyDB) + SoyServer 한 번에 실행
 # 사용: 프로젝트 루트에서 docker compose up -d
+# 시리얼 미연결 시에도 서버 기동하려면: ./scripts/compose-up.sh up -d (디바이스 없을 때 /dev/null로 대체)
 # 아두이노 시리얼(RFID): .env 에 SERIAL_DEVICE=/dev/ttyUSB0 또는 /dev/ttyACM0 설정 시 해당 장치 사용, 미설정 시 시리얼 비활성
 
 services:
