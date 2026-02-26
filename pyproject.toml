@@ -16,4 +16,6 @@ dependencies = [
     "pyserial>=3.5",
     "PyQt6-Fluent-Widgets>=1.6.0",
     "httpx>=0.28.1",
+    "reportlab>=4.4.10",
+    "qrcode[pil]>=8.2",
 ]

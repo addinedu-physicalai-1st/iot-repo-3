@@ -30,6 +30,9 @@ services:
     ports:
       - "8000:8000"   # HTTP (health, root, docs)
       - "9001:9001"   # TCP (Soy-PC: Worker CRUD, card_read 푸시)
+    volumes:
+      # 호스트 soy-server 코드 마운트 → 재빌드 없이 새 마이그레이션이 기동 시 적용됨
+      - ./soy-server:/app/soy-server
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306

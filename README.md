@@ -86,28 +86,3 @@ docker compose up -d
 uv run python designer.py    # UI 편집
 uv run python soy_pc.py     # 앱 실행 (서버 선 기동 필요)
 ```
-
-### RFID(작업자 등록키트) 사용 시 — 맥
-
-**Docker Desktop for Mac**에서는 호스트 시리얼 장치(`/dev/cu.usbmodem*`)를 컨테이너에 넘길 수 없습니다. RFID를 쓰려면 **MySQL만 Docker로 띄우고, SoyServer는 맥에서 직접 실행**하세요.
-
-1. **MySQL만 기동** (soy-server는 띄우지 않음)
-
-   ```bash
-   docker compose up -d mysql
-   ```
-
-   (또는 `docker compose up -d` 후 soy-server 컨테이너만 중지해도 됨.)
-
-2. **아두이노 USB 연결** 후 시리얼 포트 확인: `ls /dev/cu.usb*` (예: `/dev/cu.usbmodem21101`)
-
-3. **SoyServer를 로컬에서 실행** (DB는 Docker MySQL에 연결)
-
-   ```bash
-   MYSQL_HOST=127.0.0.1 MYSQL_PORT=3333 MYSQL_USER=soy MYSQL_PASSWORD=soy MYSQL_DATABASE=soydb \
-   SOY_REGISTER_SERIAL_PORT=/dev/cu.usbmodem21101 \
-   uv run uvicorn app.main:app --app-dir soy-server --host 127.0.0.1 --port 8000
-   ```
-
-   포트는 2번에서 확인한 값으로 바꾸세요. 이렇게 하면 시리얼(RFID)과 TCP(soy-pc)가 모두 동작합니다.
-

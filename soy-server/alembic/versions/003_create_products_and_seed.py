@@ -16,19 +16,15 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 # 배송지: 영문 제품명이면 해외, 아니면 국내 (ENUM: 국내, 해외)
-OVERSEAS_NAMES = {"Soy sauce", "Dark soy sauce", "Flavored soy sauce"}
+OVERSEAS_NAMES = {"Soy sauce", "Dark soy sauce"}
 
 PRODUCT_NAMES = [
     "국간장",
     "진간장",
-    "양조간장",
-    "맛간장",
-    "어묵간장",
     "Soy sauce",
     "Dark soy sauce",
-    "Flavored soy sauce",
 ]
-BRANDS = ["샘표", "청정원", "몽고"]
+BRANDS = ["샘표", "청정원"]
 
 
 def _seed_rows():
