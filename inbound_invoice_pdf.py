@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-인바운드 송장 PDF 생성기.
+발주(Order) 송장 PDF 생성기.
 
-- products 목록을 보여주고, 송장 ID와 물품별 개수를 입력받음.
-- QR 코드(NDJSON: 송장 ID + products 배열)와 테이블(물품명, 브랜드, 개수)이 있는 PDF 생성.
+- orders 테이블에 있는 발주 전부를 조회하여, 발주별로 PDF 1개 생성.
+- QR 코드에는 order_id가 들어 있음.
+- 테이블에는 해당 발주의 품목 리스트(물품명, 브랜드, 종류, 용량, 수량) 표시.
 
 실행: uv run python inbound_invoice_pdf.py
-DB 설정: MYSQL_* 또는 SOY_DATABASE_URL (soy-server와 동일). 서버 미기동 시에도 DB만 접근 가능하면 됨.
+DB 설정: MYSQL_* 또는 SOY_DATABASE_URL (soy-server와 동일).
 """
 from __future__ import annotations
 
@@ -80,48 +81,89 @@ def _get_engine() -> Engine:
 
 
 @dataclass
-class ProductRow:
-    product_id: int
-    product_name: str
+class OrderItemRow:
+    """발주 상세 한 줄 (order_items + products)."""
+    item_code: str
+    name: str
     brand: str
+    category: str | None
+    capacity: str | None
+    expected_qty: int
 
 
-def load_products(engine: Engine) -> list[ProductRow]:
+@dataclass
+class OrderRow:
+    """발주 한 건 (order + items)."""
+    order_id: int
+    order_date: str  # formatted
+    status: str
+    items: list[OrderItemRow]
+
+
+def load_orders(engine: Engine) -> list[OrderRow]:
+    """orders 전부와 order_items, products JOIN하여 반환."""
     with engine.connect() as conn:
         rows = conn.execute(
-            text(
-                "SELECT product_id, product_name, brand FROM products ORDER BY product_id"
-            )
+            text("""
+                SELECT
+                    o.order_id,
+                    o.order_date,
+                    o.status,
+                    p.item_code,
+                    p.name,
+                    p.brand,
+                    p.category,
+                    p.capacity,
+                    oi.expected_qty
+                FROM orders o
+                INNER JOIN order_items oi ON oi.order_id = o.order_id
+                INNER JOIN products p ON p.item_code = oi.item_code
+                ORDER BY o.order_id, oi.order_item_id
+            """)
         ).fetchall()
-    return [
-        ProductRow(product_id=r[0], product_name=r[1], brand=r[2]) for r in rows
-    ]
+        order_meta = conn.execute(
+            text("SELECT order_id, order_date, status FROM orders ORDER BY order_id")
+        ).fetchall()
+
+    # order_id별 품목 행 묶기
+    by_order: dict[int, list[tuple]] = {}
+    for r in rows:
+        oid = r[0]
+        if oid not in by_order:
+            by_order[oid] = []
+        by_order[oid].append(r)
+
+    result: list[OrderRow] = []
+    for oid, odate, status in order_meta:
+        item_rows = by_order.get(oid, [])
+        items = [
+            OrderItemRow(
+                item_code=r[3],
+                name=r[4] or "",
+                brand=r[5] or "",
+                category=r[6],
+                capacity=r[7],
+                expected_qty=int(r[8]),
+            )
+            for r in item_rows
+        ]
+        date_str = str(odate) if odate else ""
+        if hasattr(odate, "strftime"):
+            date_str = odate.strftime("%Y-%m-%d %H:%M")
+        result.append(
+            OrderRow(order_id=oid, order_date=date_str, status=status, items=items)
+        )
+    return result
 
 
-def input_quantity(prompt: str, default: int = 0) -> int:
-    while True:
-        s = input(prompt).strip()
-        if s == "":
-            return default
-        try:
-            n = int(s)
-            if n < 0:
-                print("  0 이상의 숫자를 입력하세요.")
-                continue
-            return n
-        except ValueError:
-            print("  숫자를 입력하세요.")
+def build_qr_payload(order_id: int) -> str:
+    """QR에 넣을 JSON 문자열 (order_id)."""
+    return json.dumps({"order_id": order_id}, ensure_ascii=False)
 
 
-def build_ndjson_line(inbound_id: str, products: list[dict]) -> str:
-    """QR에 넣을 NDJSON 한 줄 (한 개의 JSON 객체)."""
-    payload = {"inbound_id": inbound_id, "products": products}
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def make_qr_image(ndjson_line: str, size_mm: float = 35) -> io.BytesIO:
+def make_qr_image(payload: str, size_mm: float = 35) -> io.BytesIO:
     qr = qrcode.QRCode(version=1, box_size=4, border=2)
-    qr.add_data(ndjson_line)
+    qr.add_data(payload)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
     buf = io.BytesIO()
@@ -130,38 +172,15 @@ def make_qr_image(ndjson_line: str, size_mm: float = 35) -> io.BytesIO:
     return buf
 
 
-def build_invoice_products(
-    products: list[ProductRow], quantities: list[int]
-) -> list[dict]:
-    """개수가 0보다 큰 항목만 {'product_name','brand','quantity'} 리스트로."""
-    out = []
-    for p, q in zip(products, quantities):
-        if q <= 0:
-            continue
-        out.append(
-            {
-                "product_name": p.product_name,
-                "brand": p.brand,
-                "quantity": q,
-            }
-        )
-    return out
-
-
-def create_pdf(
-    out_path: str,
-    inbound_id: str,
-    products: list[ProductRow],
-    quantities: list[int],
-) -> None:
+def create_order_invoice_pdf(out_path: str, order: OrderRow) -> None:
+    """발주 1건에 대한 송장 PDF 생성. QR=order_id, 테이블=품목 리스트."""
     _register_korean_font()
 
-    invoice_products = build_invoice_products(products, quantities)
-    if not invoice_products:
-        raise ValueError("개수를 1개 이상 입력한 물품이 없습니다.")
+    if not order.items:
+        raise ValueError(f"발주 ID {order.order_id}에 품목이 없습니다.")
 
-    ndjson_line = build_ndjson_line(inbound_id, invoice_products)
-    qr_buf = make_qr_image(ndjson_line)
+    payload = build_qr_payload(order.order_id)
+    qr_buf = make_qr_image(payload)
 
     doc = SimpleDocTemplate(
         out_path,
@@ -176,27 +195,34 @@ def create_pdf(
     styles["Normal"].fontName = _FONT_KOREAN
     story = []
 
-    # 제목
+    # 제목: 발주 송장 — 발주 ID: N, 발주일: ...
     title = Paragraph(
-        f"<b>인바운드 송장</b> — 송장 ID: {inbound_id}",
+        f"<b>발주 송장</b> — 발주 ID: {order.order_id} &nbsp; 발주일: {order.order_date} &nbsp; 상태: {order.status}",
         styles["Title"],
     )
     story.append(title)
     story.append(Paragraph("<br/>", styles["Normal"]))
 
-    # QR 코드
+    # QR (order_id)
     qr_img = Image(qr_buf, width=35 * mm, height=35 * mm)
     story.append(qr_img)
     story.append(Paragraph("<br/>", styles["Normal"]))
 
-    # 테이블: 물품명, 브랜드, 개수
-    table_data = [["물품명", "브랜드", "개수"]]
-    for p, q in zip(products, quantities):
-        if q <= 0:
-            continue
-        table_data.append([p.product_name, p.brand, str(q)])
+    # 테이블: 물품명, 브랜드, 종류, 용량, 수량
+    table_data = [["물품명", "브랜드", "종류", "용량", "수량"]]
+    for it in order.items:
+        table_data.append(
+            [
+                it.name,
+                it.brand,
+                it.category or "-",
+                it.capacity or "-",
+                str(it.expected_qty),
+            ]
+        )
 
-    t = Table(table_data, colWidths=[80 * mm, 50 * mm, 25 * mm])
+    col_widths = [60 * mm, 35 * mm, 35 * mm, 20 * mm, 25 * mm]
+    t = Table(table_data, colWidths=col_widths)
     t.setStyle(
         TableStyle(
             [
@@ -210,7 +236,12 @@ def create_pdf(
                 ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#D9E2F3")),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                 ("FONTSIZE", (0, 1), (-1, -1), 10),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#E8EDF7")]),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, colors.HexColor("#E8EDF7")],
+                ),
             ]
         )
     )
@@ -218,90 +249,50 @@ def create_pdf(
     doc.build(story)
 
 
-# DB 없이 PDF 생성 테스트용 시드 데이터 (migration 003과 동일)
-_DEMO_PRODUCTS = [
-    ProductRow(1, "국간장", "샘표"),
-    ProductRow(2, "국간장", "청정원"),
-    ProductRow(3, "국간장", "몽고"),
-    ProductRow(4, "진간장", "샘표"),
-    ProductRow(5, "진간장", "청정원"),
-    ProductRow(6, "진간장", "몽고"),
-    ProductRow(7, "양조간장", "샘표"),
-    ProductRow(8, "양조간장", "청정원"),
-    ProductRow(9, "양조간장", "몽고"),
-    ProductRow(10, "맛간장", "샘표"),
-    ProductRow(11, "맛간장", "청정원"),
-    ProductRow(12, "맛간장", "몽고"),
-    ProductRow(13, "어묵간장", "샘표"),
-    ProductRow(14, "어묵간장", "청정원"),
-    ProductRow(15, "어묵간장", "몽고"),
-    ProductRow(16, "Soy sauce", "샘표"),
-    ProductRow(17, "Soy sauce", "청정원"),
-    ProductRow(18, "Soy sauce", "몽고"),
-    ProductRow(19, "Dark soy sauce", "샘표"),
-    ProductRow(20, "Dark soy sauce", "청정원"),
-    ProductRow(21, "Dark soy sauce", "몽고"),
-    ProductRow(22, "Flavored soy sauce", "샘표"),
-    ProductRow(23, "Flavored soy sauce", "청정원"),
-    ProductRow(24, "Flavored soy sauce", "몽고"),
-]
-
-
 def main() -> None:
-    import argparse
-    parser = argparse.ArgumentParser(description="인바운드 송장 PDF 생성기")
+    parser = __import__("argparse").ArgumentParser(description="발주 송장 PDF 생성기 (orders 전건)")
     parser.add_argument(
-        "--demo",
-        action="store_true",
-        help="DB 없이 시드 데이터로 테스트 (물품 목록 일부만 표시)",
+        "-o", "--out-dir",
+        default=".",
+        help="PDF 저장 디렉터리 (기본: 현재 디렉터리)",
     )
     args = parser.parse_args()
 
-    print("인바운드 송장 PDF 생성기")
+    print("발주 송장 PDF 생성기 (orders 테이블 전건)")
     print("=" * 50)
 
-    if args.demo:
-        products = _DEMO_PRODUCTS[:9]  # 일부만 표시
-        print("(데모 모드: DB 없이 시드 물품 사용)\n")
-    else:
-        engine = _get_engine()
-        try:
-            products = load_products(engine)
-        except Exception as e:
-            print(f"DB 연결/조회 실패: {e}")
-            print("MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE 또는 SOY_DATABASE_URL 확인.")
-            sys.exit(1)
-
-    if not products:
-        print("등록된 물품이 없습니다.")
-        sys.exit(1)
-
-    print("\n[물품 목록]")
-    for i, p in enumerate(products, 1):
-        print(f"  {i:2}. {p.product_name} / {p.brand}")
-
-    inbound_id = input("\n송장 ID를 입력하세요: ").strip()
-    if not inbound_id:
-        print("송장 ID가 비어 있습니다. 종료합니다.")
-        sys.exit(1)
-
-    print("\n각 물품의 개수를 입력하세요 (Enter 시 0).")
-    quantities: list[int] = []
-    for i, p in enumerate(products, 1):
-        q = input_quantity(f"  {p.product_name} ({p.brand}): ", default=0)
-        quantities.append(q)
-
-    out_path = f"inbound_invoice_{inbound_id}.pdf"
+    engine = _get_engine()
     try:
-        create_pdf(out_path, inbound_id, products, quantities)
-    except ValueError as e:
-        print(e)
-        sys.exit(1)
+        orders = load_orders(engine)
     except Exception as e:
-        print(f"PDF 생성 실패: {e}")
-        raise
+        print(f"DB 연결/조회 실패: {e}")
+        print("MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE 또는 SOY_DATABASE_URL 확인.")
+        sys.exit(1)
 
-    print(f"\n생성 완료: {out_path}")
+    if not orders:
+        print("등록된 발주가 없습니다.")
+        sys.exit(0)
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    created: list[str] = []
+    for order in orders:
+        out_path = str(out_dir / f"order_invoice_{order.order_id}.pdf")
+        try:
+            create_order_invoice_pdf(out_path, order)
+            created.append(out_path)
+            print(f"  생성: order_invoice_{order.order_id}.pdf (품목 {len(order.items)}건)")
+        except ValueError as e:
+            print(f"  건너뜀 발주 ID {order.order_id}: {e}")
+        except Exception as e:
+            print(f"  실패 발주 ID {order.order_id}: {e}")
+
+    if created:
+        print(f"\n총 {len(created)}개 PDF 생성 완료: {args.out_dir}")
+    else:
+        print("\n생성된 PDF가 없습니다.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
