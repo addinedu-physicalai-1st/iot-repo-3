@@ -1,13 +1,13 @@
-"""작업자 화면 — 돌아가기, 주문 관리(송장 QR 스캔 → 주문 delivered, inbound 기록)."""
+"""작업자 화면 — 돌아가기, 주문 관리(송장 QR 스캔), 분류하기(공정 시작/중지)."""
 import json
 import logging
 from typing import Any
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QFrame
+from PyQt6.QtWidgets import QFrame, QTableWidgetItem
 
-from api import order_mark_delivered
+from api import list_processes, order_mark_delivered, process_start, process_stop
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +115,21 @@ def setup_worker_screen(window, stacked) -> None:
 
     def on_menu_inbound_clicked():
         if worker.menu_inbound.isChecked():
+            worker.menu_classify.setChecked(False)
             stack.setCurrentIndex(1)  # page_inbound
         else:
             stack.setCurrentIndex(0)  # page_welcome
 
+    def on_menu_classify_clicked():
+        if worker.menu_classify.isChecked():
+            worker.menu_inbound.setChecked(False)
+            stack.setCurrentIndex(2)  # page_classify
+            _refresh_classify_list()
+        else:
+            stack.setCurrentIndex(0)  # page_welcome
+
     worker.menu_inbound.clicked.connect(on_menu_inbound_clicked)
+    worker.menu_classify.clicked.connect(on_menu_classify_clicked)
 
     # ----- 주문 관리 페이지: 카메라 + 송장 QR 스캔 -----
     camera_thread: CameraQRThread | None = None
@@ -190,6 +200,117 @@ def setup_worker_screen(window, stacked) -> None:
 
     worker.scanToggleButton.clicked.connect(on_scan_toggle)
 
+    # ----- 분류하기 페이지: 공정 목록, 한 번에 하나만 시작/중지 -----
+    _classify_processes: list[dict[str, Any]] = []
+
+    def _refresh_classify_list():
+        nonlocal _classify_processes
+        try:
+            _classify_processes = list_processes()
+        except (TimeoutError, OSError, ConnectionError) as e:
+            worker.classifyResultLabel.setText(f"서버 연결 실패.\n{e!s}")
+            worker.processTable.setRowCount(0)
+            worker.label_running_status.setText("현재 진행 중: (목록 불러오기 실패)")
+            worker.classifyToggleButton.setEnabled(False)
+            return
+        except RuntimeError as e:
+            worker.classifyResultLabel.setText(str(e))
+            worker.processTable.setRowCount(0)
+            worker.label_running_status.setText("현재 진행 중: (오류)")
+            worker.classifyToggleButton.setEnabled(False)
+            return
+        worker.classifyResultLabel.setText("")
+        running = next((p for p in _classify_processes if (p.get("status") or "").upper() == "RUNNING"), None)
+        worker.processTable.setHorizontalHeaderLabels(
+            ["공정 ID", "주문 ID", "상태", "시작 시각", "종료 시각", "1L", "2L", "미분류"]
+        )
+        worker.processTable.setRowCount(0)
+        for p in _classify_processes:
+            row = worker.processTable.rowCount()
+            worker.processTable.insertRow(row)
+            pid = p.get("process_id")
+            oid = p.get("order_id")
+            st = (p.get("status") or "").upper()
+            def _fmt_dt(s: str | None) -> str:
+                if not s:
+                    return "—"
+                return s.replace("T", " ")[:16]  # YYYY-MM-DD HH:MM
+            start_str = _fmt_dt(p.get("start_time"))
+            end_str = _fmt_dt(p.get("end_time"))
+            s1l = p.get("success_1l_qty", 0)
+            s2l = p.get("success_2l_qty", 0)
+            uncl = p.get("unclassified_qty", 0)
+            item0 = QTableWidgetItem(str(pid))
+            item0.setData(Qt.ItemDataRole.UserRole, pid)
+            worker.processTable.setItem(row, 0, item0)
+            worker.processTable.setItem(row, 1, QTableWidgetItem(str(oid)))
+            worker.processTable.setItem(row, 2, QTableWidgetItem(st))
+            worker.processTable.setItem(row, 3, QTableWidgetItem(start_str))
+            worker.processTable.setItem(row, 4, QTableWidgetItem(end_str))
+            worker.processTable.setItem(row, 5, QTableWidgetItem(str(s1l)))
+            worker.processTable.setItem(row, 6, QTableWidgetItem(str(s2l)))
+            worker.processTable.setItem(row, 7, QTableWidgetItem(str(uncl)))
+        # 시각 컬럼·수량 컬럼 너비 고정
+        worker.processTable.setColumnWidth(3, 150)
+        worker.processTable.setColumnWidth(4, 150)
+        worker.processTable.setColumnWidth(5, 50)
+        worker.processTable.setColumnWidth(6, 50)
+        worker.processTable.setColumnWidth(7, 55)
+        if running:
+            worker.label_running_status.setText(f"현재 진행 중: 공정 #{running['process_id']} (주문 #{running['order_id']})")
+        else:
+            worker.label_running_status.setText("현재 진행 중: 없음")
+        _classify_update_toggle_button()
+
+    def _classify_update_toggle_button():
+        """선택된 공정에 따라 [시작]/[중지] 버튼 문구·활성화."""
+        running = next((p for p in _classify_processes if (p.get("status") or "").upper() == "RUNNING"), None)
+        row = worker.processTable.currentRow()
+        item0 = worker.processTable.item(row, 0) if row >= 0 else None
+        pid = item0.data(Qt.ItemDataRole.UserRole) if item0 else None
+        p = next((x for x in _classify_processes if x.get("process_id") == pid), None) if pid is not None else None
+        is_selected_running = p and (p.get("status") or "").upper() == "RUNNING"
+        if is_selected_running:
+            worker.classifyToggleButton.setText("중지")
+            worker.classifyToggleButton.setEnabled(True)
+        elif pid and not running:
+            worker.classifyToggleButton.setText("시작")
+            worker.classifyToggleButton.setEnabled(True)
+        else:
+            worker.classifyToggleButton.setText("시작")
+            worker.classifyToggleButton.setEnabled(False)
+
+    def on_classify_selection_changed():
+        _classify_update_toggle_button()
+
+    def on_classify_toggle():
+        row = worker.processTable.currentRow()
+        if row < 0:
+            worker.classifyResultLabel.setText("공정을 선택하세요.")
+            return
+        item0 = worker.processTable.item(row, 0)
+        pid = item0.data(Qt.ItemDataRole.UserRole) if item0 else None
+        if pid is None:
+            return
+        p = next((x for x in _classify_processes if x.get("process_id") == pid), None)
+        is_running = p and (p.get("status") or "").upper() == "RUNNING"
+        try:
+            if is_running:
+                process_stop(int(pid))
+                worker.classifyResultLabel.setText("공정을 중지했습니다.")
+            else:
+                process_start(int(pid))
+                worker.classifyResultLabel.setText("공정을 시작했습니다.")
+            _refresh_classify_list()
+        except RuntimeError as e:
+            worker.classifyResultLabel.setText(f"처리 실패: {e}")
+        except (TimeoutError, OSError, ConnectionError) as e:
+            worker.classifyResultLabel.setText(f"서버 연결 실패.\n{e!s}")
+
+    worker.processTable.itemSelectionChanged.connect(on_classify_selection_changed)
+    worker.classifyToggleButton.clicked.connect(on_classify_toggle)
+    worker.classifyRefreshButton.clicked.connect(_refresh_classify_list)
+
     def stop_camera_if_leaving():
         nonlocal scan_active, camera_thread
         try:
@@ -203,7 +324,7 @@ def setup_worker_screen(window, stacked) -> None:
 
     def stop_camera_if_switching_to_welcome(index: int):
         nonlocal scan_active, camera_thread
-        if index != 1 and scan_active:  # 1 = page_inbound
+        if index != 1 and scan_active:  # 1 = page_inbound only
             try:
                 if camera_thread and camera_thread.isRunning():
                     camera_thread.stop()

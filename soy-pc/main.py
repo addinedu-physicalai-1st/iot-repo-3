@@ -44,7 +44,7 @@ def main() -> None:
 
     window = FluentWidget()
     window.setWindowTitle("Soy-PC")
-    window.resize(800, 600)
+    window.resize(1100, 750)
     window.setMicaEffectEnabled(False)
     window.setCustomBackgroundColor(QColor(BG_MAIN), QColor(BG_MAIN))
 

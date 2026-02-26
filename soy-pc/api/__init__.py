@@ -9,8 +9,11 @@ from api.client import (
     delete_worker,
     get_first_admin_id,
     get_order_id_by_order_item_id,
+    list_processes,
     list_workers,
     order_mark_delivered,
+    process_start,
+    process_stop,
     update_worker,
 )
 
@@ -24,4 +27,7 @@ __all__ = [
     "WorkerCreateConflict",
     "get_order_id_by_order_item_id",
     "order_mark_delivered",
+    "list_processes",
+    "process_start",
+    "process_stop",
 ]

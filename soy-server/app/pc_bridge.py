@@ -17,7 +17,7 @@ MAX_FRAME_PAYLOAD = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
-from app import orders, workers
+from app import orders, processes as processes_module, workers
 from app.auth import create_first_admin, verify_admin_password
 
 # 환경변수
@@ -183,6 +183,28 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
             if err:
                 return (False, None, err)
             return (True, {"order_id": oid, "process_id": process_id}, "")
+        # 공정 목록/시작/중지 (작업자 화면 분류하기, 인증 불필요)
+        if action == "list_processes":
+            lst = processes_module.list_processes()
+            return (True, lst, "")
+        if action == "process_start":
+            pid = body.get("process_id")
+            if pid is None:
+                return (False, None, "process_id required")
+            try:
+                out = processes_module.start_process(int(pid))
+                return (True, out, "")
+            except processes_module.ProcessNotFound:
+                return (False, None, "공정을 찾을 수 없습니다.")
+        if action == "process_stop":
+            pid = body.get("process_id")
+            if pid is None:
+                return (False, None, "process_id required")
+            try:
+                out = processes_module.stop_process(int(pid))
+                return (True, out, "")
+            except processes_module.ProcessNotFound:
+                return (False, None, "공정을 찾을 수 없습니다.")
         # Worker CRUD는 admin 로그인 필수
         ok, err = _require_admin(body)
         if not ok:
@@ -221,6 +243,8 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
         return (False, None, "Worker not found")
     except workers.WorkerCreateConflict as e:
         return (False, None, e.detail)
+    except processes_module.ProcessNotFound:
+        return (False, None, "공정을 찾을 수 없습니다.")
     except orders.OrderNotFound:
         return (False, None, "주문을 찾을 수 없습니다.")
     except Exception as e:

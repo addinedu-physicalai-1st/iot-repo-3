@@ -229,7 +229,8 @@ QWidget#WorkerScreen QFrame#worker_sidebar QLabel#label_worker_menuTitle {{
   font-weight: bold;
   padding: 12px 0 8px 0;
 }}
-QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify {{
   background-color: transparent;
   color: {TEXT_PRIMARY};
   border: none;
@@ -237,10 +238,12 @@ QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound {{
   text-align: left;
   padding: 8px 12px;
 }}
-QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:hover {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:hover,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:hover {{
   background-color: {BG_BUTTON};
 }}
-QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:checked {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:checked,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:checked {{
   background-color: {ACCENT_SOFT};
   color: {ACCENT_HOVER};
   font-weight: 600;
@@ -268,6 +271,33 @@ QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_title {{
 QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_hint {{
   color: {TEXT_SECONDARY};
   font-size: 15px;
+}}
+/* 분류하기 — 공정 목록 테이블 (관리자 작업자 테이블과 동일 스타일) */
+QWidget#WorkerScreen QTableWidget {{
+  background-color: {BG_CARD};
+  border: 1px solid {BORDER};
+  border-radius: 8px;
+  gridline-color: {BORDER};
+}}
+QWidget#WorkerScreen QTableWidget::item {{
+  padding: 8px 12px;
+  color: {TEXT_PRIMARY};
+}}
+QWidget#WorkerScreen QTableWidget::item:selected {{
+  background-color: {ACCENT_SOFT};
+  color: {TEXT_PRIMARY};
+}}
+QWidget#WorkerScreen QTableWidget QHeaderView::section {{
+  background-color: {BG_BUTTON};
+  color: {TEXT_SECONDARY};
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 2px solid {BORDER};
+  border-right: 1px solid {BORDER};
+  font-weight: 600;
+}}
+QWidget#WorkerScreen QTableWidget QHeaderView::section:last {{
+  border-right: none;
 }}
 
 /* ========== 관리자 화면 (사이드바 + 콘텐츠) ========== */

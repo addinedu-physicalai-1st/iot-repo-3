@@ -372,3 +372,30 @@ def order_mark_delivered(*, order_id: int | None = None, order_item_id: int | No
     if not ok:
         raise RuntimeError(err or "입고 처리 실패")
     return res or {}
+
+
+# ----- 공정(분류하기) -----
+
+
+def list_processes() -> list[dict]:
+    """공정 목록 (process_id 내림차순)."""
+    ok, body, err = _request("list_processes", {})
+    if not ok:
+        raise RuntimeError(err or "공정 목록 조회 실패")
+    return body if isinstance(body, list) else []
+
+
+def process_start(process_id: int) -> dict:
+    """공정 시작. 한 번에 하나만 RUNNING. 없으면 RuntimeError."""
+    ok, body, err = _request("process_start", {"process_id": process_id})
+    if not ok:
+        raise RuntimeError(err or "공정 시작 실패")
+    return body or {}
+
+
+def process_stop(process_id: int) -> dict:
+    """공정 중지. 없으면 RuntimeError."""
+    ok, body, err = _request("process_stop", {"process_id": process_id})
+    if not ok:
+        raise RuntimeError(err or "공정 중지 실패")
+    return body or {}
