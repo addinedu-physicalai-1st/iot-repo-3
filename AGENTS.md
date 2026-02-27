@@ -43,3 +43,42 @@ cd soy-server && uv run alembic upgrade head   # DB 마이그레이션 적용
 ```
 
 펌웨어(access-controller, soy-controller)는 VSCode + PlatformIO IDE로 해당 폴더를 열어 빌드·업로드.
+
+---
+
+## 4. soy-server app 구조 (AI 참고용)
+
+`soy-server/` 실행 시 `--app-dir soy-server` 로 `app` 패키지가 로드된다. 아래는 **MVC + 도메인 서비스** 구조 요약.
+
+### 4.1 디렉터리 개요
+
+| 경로 | 역할 (MVC) | 설명 |
+|------|-------------|------|
+| `app/main.py` | 진입점 | FastAPI 앱·TCP·시리얼 기동. |
+| `app/database.py` | 인프라 | DB 세션(`get_session`). |
+| `app/models/` | Model | ORM 엔티티(Order, Process, Worker, Admin 등). |
+| `app/auth.py` | Model/서비스 | 관리자 비밀번호 검증·최초 등록. |
+| `app/services/` | Model (도메인) | **주문·공정·작업자** DB 로직. TCP/HTTP를 모름. |
+| `app/requests/` | Controller | PC 브릿지 TCP 요청: `action`+`body` → `(ok, body, err)`. `app.services` 호출. |
+| `app/views/` | View | Controller 결과 → TCP 응답 JSON 구조(`format_response`). |
+| `app/pc_bridge.py` | 전송 계층 | TCP 프레임 수신/송신, 세션, `_handle_request`로 라우팅 후 View로 응답. |
+
+### 4.2 서비스·요청·뷰 매핑
+
+- **`app/services/orders.py`** — `get_order`, `get_order_id_by_order_item_id`, `set_order_delivered_and_create_process`. 예외: `OrderNotFound`.
+- **`app/services/processes.py`** — `list_processes`, `start_process`, `stop_process`, `update_process`. 예외: `ProcessNotFound`.
+- **`app/services/workers.py`** — `count_admins`, `get_first_admin_id`, `list_workers`, `create_worker`, `update_worker`, `delete_worker`. 예외: `WorkerNotFound`, `WorkerCreateConflict`.
+- **`app/requests/auth.py`** — 인증 불필요: `admin_login`, `admin_logout`, `admin_count`, `register_first_admin`. 세션은 `pc_bridge`에서 주입.
+- **`app/requests/orders.py`** — 인증 불필요: `get_order`, `get_order_id_by_order_item_id`, `order_mark_delivered`.
+- **`app/requests/processes.py`** — 인증 불필요: `list_processes`, `process_start`, `process_stop`, `process_update`.
+- **`app/requests/workers.py`** — **admin 로그인 필수**: `get_first_admin_id`, `list_workers`, `create_worker`, `update_worker`, `delete_worker`.
+- **`app/views/tcp_response.py`** — `format_response(req_id, ok, body, error)` → `{ type, id, ok, body, error }` dict.
+
+### 4.3 의존 방향 (에이전트 작업 시 참고)
+
+- **Model**: `models`, `database`, `auth`, `services/*` — 프로토콜/전송 계층을 import 하지 않음.
+- **Controller**: `app/requests/*` → `app.services`, `app.auth` 만 사용.
+- **View**: `app/views/*` — 순수 응답 포맷만.
+- **전송**: `pc_bridge` → `app.requests`, `app.views`, `app.services`(예외 타입용). 세션(`_sessions`)은 `pc_bridge` 소유.
+
+새 액션 추가 시: 도메인 로직은 `app/services/` 또는 `app/auth`, 라우팅·파라미터 해석은 `app/requests/` 해당 파일, 응답 형식 변경은 `app/views/` 에서 처리하면 됨.

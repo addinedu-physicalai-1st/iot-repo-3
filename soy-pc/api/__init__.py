@@ -14,6 +14,7 @@ from api.client import (
     order_mark_delivered,
     process_start,
     process_stop,
+    process_update,
     update_worker,
 )
 
@@ -30,4 +31,5 @@ __all__ = [
     "list_processes",
     "process_start",
     "process_stop",
+    "process_update",
 ]

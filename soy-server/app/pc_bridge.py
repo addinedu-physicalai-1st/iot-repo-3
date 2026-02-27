@@ -9,7 +9,6 @@ import os
 import socket
 import struct
 import threading
-import uuid
 from typing import Any
 
 # TCP 프레임: 헤더 4바이트(big-endian uint32) = payload 바이트 수, 이후 payload. 최대 1MB.
@@ -17,8 +16,9 @@ MAX_FRAME_PAYLOAD = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
-from app import orders, processes as processes_module, workers
-from app.auth import create_first_admin, verify_admin_password
+from app.services import orders, processes as processes_module, workers
+from app.requests import handle_admin_only, handle_no_auth
+from app.views import format_response
 
 # 환경변수
 TCP_PORT = int(os.environ.get("SOY_PC_TCP_PORT", "9001"))
@@ -109,136 +109,31 @@ def _require_admin(body: dict[str, Any]) -> tuple[bool, str]:
     return (True, "")
 
 
+def _session_add(token: str, admin_id: int) -> None:
+    with _sessions_lock:
+        _sessions[token] = admin_id
+
+
+def _session_remove(token: str) -> None:
+    with _sessions_lock:
+        _sessions.pop(token, None)
+
+
 def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
-    """CRUD 또는 admin_login 실행. (ok, body_or_none, error_message)."""
+    """요청 라우팅: 인증 불필요 → 인증 필요(admin) 순으로 처리. 핸들러는 app.requests에서."""
     try:
-        if action == "admin_login":
-            password = (body.get("password") or "").strip()
-            if not password:
-                return (False, None, "Password required")
-            if not verify_admin_password(password):
-                return (False, None, "비밀번호가 올바르지 않습니다.")
-            aid = workers.get_first_admin_id()
-            if aid is None:
-                return (False, None, "No admin registered")
-            token = str(uuid.uuid4())
-            with _sessions_lock:
-                _sessions[token] = aid
-            return (True, {"token": token, "admin_id": aid}, "")
-        if action == "admin_logout":
-            token = body.get("auth_token")
-            if token:
-                with _sessions_lock:
-                    _sessions.pop(token, None)
-            return (True, None, "")
-        if action == "admin_count":
-            n = workers.count_admins()
-            return (True, {"count": n}, "")
-        if action == "register_first_admin":
-            password = (body.get("password") or "").strip()
-            if not password:
-                return (False, None, "비밀번호를 입력하세요.")
-            if len(password) < 4:
-                return (False, None, "비밀번호는 4자 이상으로 설정하세요.")
-            try:
-                create_first_admin(password)
-                return (True, None, "")
-            except ValueError as e:
-                return (False, None, str(e))
-        # 주문/입고 (작업자 화면 입고관리, 인증 불필요)
-        if action == "get_order":
-            oid = body.get("order_id")
-            if oid is None:
-                return (False, None, "order_id required")
-            order = orders.get_order(int(oid))
-            if order is None:
-                return (False, None, "주문을 찾을 수 없습니다.")
-            return (True, order, "")
-        if action == "get_order_id_by_order_item_id":
-            oiid = body.get("order_item_id")
-            if oiid is None:
-                return (False, None, "order_item_id required")
-            oid = orders.get_order_id_by_order_item_id(int(oiid))
-            if oid is None:
-                return (False, None, "주문 상세를 찾을 수 없습니다.")
-            return (True, {"order_id": oid}, "")
-        if action == "order_mark_delivered":
-            oid = body.get("order_id")
-            oiid = body.get("order_item_id")
-            if oid is None and oiid is None:
-                return (False, None, "order_id 또는 order_item_id가 필요합니다.")
-            if oid is None:
-                oid = orders.get_order_id_by_order_item_id(int(oiid))
-                if oid is None:
-                    return (False, None, "주문 상세를 찾을 수 없습니다.")
-            else:
-                oid = int(oid)
-            try:
-                err, process_id = orders.set_order_delivered_and_create_process(oid)
-            except orders.OrderNotFound:
-                return (False, None, "주문을 찾을 수 없습니다.")
-            except Exception as e:
-                logger.warning("order_mark_delivered: 트랜잭션 실패 order_id=%s: %s", oid, e)
-                return (False, None, f"입고 등록 실패. 주문은 변경되지 않았습니다. ({e})")
-            if err:
-                return (False, None, err)
-            return (True, {"order_id": oid, "process_id": process_id}, "")
-        # 공정 목록/시작/중지 (작업자 화면 분류하기, 인증 불필요)
-        if action == "list_processes":
-            lst = processes_module.list_processes()
-            return (True, lst, "")
-        if action == "process_start":
-            pid = body.get("process_id")
-            if pid is None:
-                return (False, None, "process_id required")
-            try:
-                out = processes_module.start_process(int(pid))
-                return (True, out, "")
-            except processes_module.ProcessNotFound:
-                return (False, None, "공정을 찾을 수 없습니다.")
-        if action == "process_stop":
-            pid = body.get("process_id")
-            if pid is None:
-                return (False, None, "process_id required")
-            try:
-                out = processes_module.stop_process(int(pid))
-                return (True, out, "")
-            except processes_module.ProcessNotFound:
-                return (False, None, "공정을 찾을 수 없습니다.")
-        # Worker CRUD는 admin 로그인 필수
+        result = handle_no_auth(
+            action,
+            body,
+            session_add=_session_add,
+            session_remove=_session_remove,
+        )
+        if result is not None:
+            return result
         ok, err = _require_admin(body)
         if not ok:
             return (False, None, err)
-        if action == "get_first_admin_id":
-            aid = workers.get_first_admin_id()
-            return (True, {"admin_id": aid} if aid is not None else None, "")
-        if action == "list_workers":
-            return (True, workers.list_workers(), "")
-        if action == "create_worker":
-            aid = body.get("admin_id")
-            name = body.get("name", "")
-            uid = body.get("card_uid", "")
-            if aid is None:
-                return (False, None, "admin_id required")
-            out = workers.create_worker(int(aid), name, uid)
-            return (True, out, "")
-        if action == "update_worker":
-            wid = body.get("worker_id")
-            if wid is None:
-                return (False, None, "worker_id required")
-            out = workers.update_worker(
-                int(wid),
-                name=body.get("name"),
-                card_uid=body.get("card_uid"),
-            )
-            return (True, out, "")
-        if action == "delete_worker":
-            wid = body.get("worker_id")
-            if wid is None:
-                return (False, None, "worker_id required")
-            workers.delete_worker(int(wid))
-            return (True, None, "")
-        return (False, None, f"Unknown action: {action}")
+        return handle_admin_only(action, body)
     except workers.WorkerNotFound:
         return (False, None, "Worker not found")
     except workers.WorkerCreateConflict as e:
@@ -268,13 +163,7 @@ def _handle_client(sock: socket.socket) -> None:
             action = msg.get("action", "")
             body = msg.get("body") or {}
             ok, res_body, err = _handle_request(action, body)
-            resp = {
-                "type": "response",
-                "id": req_id,
-                "ok": ok,
-                "body": res_body,
-                "error": err if not ok else None,
-            }
+            resp = format_response(req_id, ok, res_body, err)
             resp_bytes = json.dumps(resp, ensure_ascii=False).encode("utf-8")
             if not _send_frame(sock, resp_bytes):
                 break

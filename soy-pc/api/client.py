@@ -399,3 +399,24 @@ def process_stop(process_id: int) -> dict:
     if not ok:
         raise RuntimeError(err or "공정 중지 실패")
     return body or {}
+
+
+def process_update(
+    process_id: int,
+    *,
+    success_1l_qty: int | None = None,
+    success_2l_qty: int | None = None,
+    unclassified_qty: int | None = None,
+) -> dict:
+    """공정 수량(1L, 2L, 미분류) 갱신. None인 필드는 변경하지 않음."""
+    body: dict[str, Any] = {"process_id": process_id}
+    if success_1l_qty is not None:
+        body["success_1l_qty"] = success_1l_qty
+    if success_2l_qty is not None:
+        body["success_2l_qty"] = success_2l_qty
+    if unclassified_qty is not None:
+        body["unclassified_qty"] = unclassified_qty
+    ok, res, err = _request("process_update", body)
+    if not ok:
+        raise RuntimeError(err or "공정 수량 갱신 실패")
+    return res or {}

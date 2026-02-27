@@ -7,7 +7,13 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QFrame, QTableWidgetItem
 
-from api import list_processes, order_mark_delivered, process_start, process_stop
+from api import (
+    list_processes,
+    order_mark_delivered,
+    process_start,
+    process_stop,
+    process_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,31 +231,44 @@ def setup_worker_screen(window, stacked) -> None:
             ["공정 ID", "주문 ID", "상태", "시작 시각", "종료 시각", "1L", "2L", "미분류"]
         )
         worker.processTable.setRowCount(0)
-        for p in _classify_processes:
-            row = worker.processTable.rowCount()
-            worker.processTable.insertRow(row)
-            pid = p.get("process_id")
-            oid = p.get("order_id")
-            st = (p.get("status") or "").upper()
-            def _fmt_dt(s: str | None) -> str:
-                if not s:
-                    return "—"
-                return s.replace("T", " ")[:16]  # YYYY-MM-DD HH:MM
-            start_str = _fmt_dt(p.get("start_time"))
-            end_str = _fmt_dt(p.get("end_time"))
-            s1l = p.get("success_1l_qty", 0)
-            s2l = p.get("success_2l_qty", 0)
-            uncl = p.get("unclassified_qty", 0)
-            item0 = QTableWidgetItem(str(pid))
-            item0.setData(Qt.ItemDataRole.UserRole, pid)
-            worker.processTable.setItem(row, 0, item0)
-            worker.processTable.setItem(row, 1, QTableWidgetItem(str(oid)))
-            worker.processTable.setItem(row, 2, QTableWidgetItem(st))
-            worker.processTable.setItem(row, 3, QTableWidgetItem(start_str))
-            worker.processTable.setItem(row, 4, QTableWidgetItem(end_str))
-            worker.processTable.setItem(row, 5, QTableWidgetItem(str(s1l)))
-            worker.processTable.setItem(row, 6, QTableWidgetItem(str(s2l)))
-            worker.processTable.setItem(row, 7, QTableWidgetItem(str(uncl)))
+        worker.processTable.blockSignals(True)
+        try:
+            for p in _classify_processes:
+                row = worker.processTable.rowCount()
+                worker.processTable.insertRow(row)
+                pid = p.get("process_id")
+                oid = p.get("order_id")
+                st = (p.get("status") or "").upper()
+                def _fmt_dt(s: str | None) -> str:
+                    if not s:
+                        return "—"
+                    return s.replace("T", " ")[:16]  # YYYY-MM-DD HH:MM
+                start_str = _fmt_dt(p.get("start_time"))
+                end_str = _fmt_dt(p.get("end_time"))
+                s1l = p.get("success_1l_qty", 0)
+                s2l = p.get("success_2l_qty", 0)
+                uncl = p.get("unclassified_qty", 0)
+                flags_ro = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+                flags_ed = flags_ro | Qt.ItemFlag.ItemIsEditable
+                item0 = QTableWidgetItem(str(pid))
+                item0.setData(Qt.ItemDataRole.UserRole, pid)
+                item0.setFlags(flags_ro)
+                worker.processTable.setItem(row, 0, item0)
+                for col, val in [(1, str(oid)), (2, st), (3, start_str), (4, end_str)]:
+                    it = QTableWidgetItem(val)
+                    it.setFlags(flags_ro)
+                    worker.processTable.setItem(row, col, it)
+                it5 = QTableWidgetItem(str(s1l))
+                it5.setFlags(flags_ed)
+                worker.processTable.setItem(row, 5, it5)
+                it6 = QTableWidgetItem(str(s2l))
+                it6.setFlags(flags_ed)
+                worker.processTable.setItem(row, 6, it6)
+                it7 = QTableWidgetItem(str(uncl))
+                it7.setFlags(flags_ed)
+                worker.processTable.setItem(row, 7, it7)
+        finally:
+            worker.processTable.blockSignals(False)
         # 시각 컬럼·수량 컬럼 너비 고정
         worker.processTable.setColumnWidth(3, 150)
         worker.processTable.setColumnWidth(4, 150)
@@ -307,6 +326,67 @@ def setup_worker_screen(window, stacked) -> None:
         except (TimeoutError, OSError, ConnectionError) as e:
             worker.classifyResultLabel.setText(f"서버 연결 실패.\n{e!s}")
 
+    def on_classify_cell_changed(row: int, col: int):
+        if col not in (5, 6, 7):
+            return
+        item0 = worker.processTable.item(row, 0)
+        pid = item0.data(Qt.ItemDataRole.UserRole) if item0 else None
+        if pid is None:
+            return
+        item = worker.processTable.item(row, col)
+        if not item:
+            return
+        raw = item.text().strip()
+        try:
+            val = int(raw)
+            if val < 0:
+                raise ValueError("0 이상이어야 합니다")
+        except ValueError:
+            worker.processTable.blockSignals(True)
+            p = next((x for x in _classify_processes if x.get("process_id") == pid), None)
+            old = (
+                p.get("success_1l_qty", 0) if col == 5
+                else p.get("success_2l_qty", 0) if col == 6
+                else p.get("unclassified_qty", 0)
+            )
+            item.setText(str(old))
+            worker.processTable.blockSignals(False)
+            worker.classifyResultLabel.setText("1L, 2L, 미분류에는 0 이상의 숫자만 입력하세요.")
+            return
+        field = {5: "success_1l_qty", 6: "success_2l_qty", 7: "unclassified_qty"}[col]
+        try:
+            process_update(int(pid), **{field: val})
+            for x in _classify_processes:
+                if x.get("process_id") == pid:
+                    x[field] = val
+                    break
+            worker.classifyResultLabel.setText("수량이 저장되었습니다.")
+        except RuntimeError as e:
+            worker.processTable.blockSignals(True)
+            p = next((x for x in _classify_processes if x.get("process_id") == pid), None)
+            old = (
+                p.get("success_1l_qty", 0) if col == 5
+                else p.get("success_2l_qty", 0) if col == 6
+                else p.get("unclassified_qty", 0)
+            )
+            item.setText(str(old))
+            worker.processTable.blockSignals(False)
+            worker.classifyResultLabel.setText(f"저장 실패: {e}")
+        except (TimeoutError, OSError, ConnectionError) as e:
+            worker.processTable.blockSignals(True)
+            p = next((x for x in _classify_processes if x.get("process_id") == pid), None)
+            old = (
+                p.get("success_1l_qty", 0) if col == 5
+                else p.get("success_2l_qty", 0) if col == 6
+                else p.get("unclassified_qty", 0)
+            )
+            item.setText(str(old))
+            worker.processTable.blockSignals(False)
+            worker.classifyResultLabel.setText(f"서버 연결 실패.\n{e!s}")
+
+    worker.processTable.itemChanged.connect(
+        lambda item: on_classify_cell_changed(item.row(), item.column())
+    )
     worker.processTable.itemSelectionChanged.connect(on_classify_selection_changed)
     worker.classifyToggleButton.clicked.connect(on_classify_toggle)
     worker.classifyRefreshButton.clicked.connect(_refresh_classify_list)

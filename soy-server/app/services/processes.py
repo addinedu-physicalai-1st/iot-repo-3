@@ -94,3 +94,38 @@ def stop_process(process_id: int, engine: Engine | None = None) -> dict[str, Any
             "end_time": process.end_time.isoformat() if process.end_time else None,
             "status": process.status,
         }
+
+
+def update_process(
+    process_id: int,
+    *,
+    success_1l_qty: int | None = None,
+    success_2l_qty: int | None = None,
+    unclassified_qty: int | None = None,
+    engine: Engine | None = None,
+) -> dict[str, Any]:
+    """공정 수량(1L, 2L, 미분류)만 갱신. None인 필드는 변경하지 않음."""
+    with get_session() as session:
+        process = session.get(Process, process_id)
+        if not process:
+            raise ProcessNotFound()
+        if success_1l_qty is not None:
+            process.success_1l_qty = max(0, success_1l_qty)
+        if success_2l_qty is not None:
+            process.success_2l_qty = max(0, success_2l_qty)
+        if unclassified_qty is not None:
+            process.unclassified_qty = max(0, unclassified_qty)
+        session.flush()
+        logger.info(
+            "process_id=%s updated 1l=%s 2l=%s uncl=%s",
+            process_id,
+            process.success_1l_qty,
+            process.success_2l_qty,
+            process.unclassified_qty,
+        )
+        return {
+            "process_id": process.process_id,
+            "success_1l_qty": process.success_1l_qty,
+            "success_2l_qty": process.success_2l_qty,
+            "unclassified_qty": process.unclassified_qty,
+        }
