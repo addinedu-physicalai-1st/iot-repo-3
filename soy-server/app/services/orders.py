@@ -5,6 +5,7 @@ ORM 사용.
 """
 import logging
 
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.database import get_session
@@ -28,6 +29,36 @@ def get_order(order_id: int, engine: Engine | None = None) -> dict | None:
             "order_date": order.order_date.isoformat() if order.order_date else "",
             "status": (order.status or "").strip().upper(),
         }
+
+
+def list_orders(engine: Engine | None = None) -> list[dict]:
+    """전체 주문 목록 조회. 각 주문에 order_items 포함(품목명=브랜드+종류+용량). order_id 오름차순."""
+    with get_session() as session:
+        # item_code -> 물품명(브랜드 + 종류 + 용량)
+        rows = session.execute(text("SELECT item_code, name FROM products")).fetchall()
+        product_names = {row[0]: row[1] for row in rows} if rows else {}
+
+        orders_query = session.query(Order).order_by(Order.order_id.asc())
+        result = []
+        for order in orders_query:
+            items = [
+                {
+                    "order_item_id": oi.order_item_id,
+                    "item_code": oi.item_code or "",
+                    "expected_qty": oi.expected_qty or 0,
+                    "product_name": product_names.get(oi.item_code, oi.item_code or ""),
+                }
+                for oi in order.order_items
+            ]
+            result.append(
+                {
+                    "order_id": order.order_id,
+                    "order_date": order.order_date.isoformat() if order.order_date else "",
+                    "status": (order.status or "").strip().upper(),
+                    "items": items,
+                }
+            )
+        return result
 
 
 def get_order_id_by_order_item_id(order_item_id: int, engine: Engine | None = None) -> int | None:

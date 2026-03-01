@@ -9,7 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 def handle(action: str, body: dict[str, Any]) -> Result | None:
-    """get_order, get_order_id_by_order_item_id, order_mark_delivered."""
+    """list_orders, get_order, get_order_id_by_order_item_id, order_mark_delivered."""
+    if action == "list_orders":
+        orders_list = orders_module.list_orders()
+        return (True, orders_list, "")
     if action == "get_order":
         oid = body.get("order_id")
         if oid is None:

@@ -1,13 +1,21 @@
 """작업자 화면 — 돌아가기, 주문 관리(송장 QR 스캔), 분류하기(공정 시작/중지)."""
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QFrame, QTableWidgetItem
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QTableWidgetItem,
+)
 
 from api import (
+    list_orders,
     list_processes,
     order_mark_delivered,
     process_start,
@@ -98,6 +106,122 @@ def _parse_qr_payload(data: str) -> dict[str, Any] | None:
         return None
 
 
+class InboundScanDialog(QDialog):
+    """주문 입고 처리용 QR 스캔 팝업. 카메라 미리보기 + 스캔 시작/중지 + 닫기."""
+
+    def __init__(self, parent=None, on_order_delivered: Callable[[], None] | None = None):
+        super().__init__(parent)
+        self.on_order_delivered = on_order_delivered or (lambda: None)
+        self.setWindowTitle("주문 입고 처리 — 송장 QR 스캔")
+        self.setMinimumSize(520, 480)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        self.cameraPreview = QLabel("카메라 미리보기")
+        self.cameraPreview.setMinimumSize(480, 360)
+        self.cameraPreview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cameraPreview.setFrameShape(QFrame.Shape.Box)
+        layout.addWidget(self.cameraPreview)
+
+        self.resultLabel = QLabel(
+            "송장 QR을 카메라에 비춰 주세요. 스캔 시작 버튼을 누른 뒤 QR을 인식하면 자동으로 입고 처리됩니다."
+        )
+        self.resultLabel.setWordWrap(True)
+        self.resultLabel.setStyleSheet("font-size: 12px;")
+        layout.addWidget(self.resultLabel)
+
+        self.scanToggleButton = QPushButton("QR 스캔 시작")
+        self.scanToggleButton.setMinimumHeight(40)
+        layout.addWidget(self.scanToggleButton)
+
+        self.closeButton = QPushButton("닫기")
+        self.closeButton.setMinimumHeight(36)
+        layout.addWidget(self.closeButton)
+
+        self._camera_thread: CameraQRThread | None = None
+        self._scan_active = False
+
+        self.scanToggleButton.clicked.connect(self._on_scan_toggle)
+        self.closeButton.clicked.connect(self.reject)
+
+    def _stop_camera(self):
+        if self._camera_thread and self._camera_thread.isRunning():
+            self._camera_thread.stop()
+            self._camera_thread.wait(3000)
+        self.cameraPreview.clear()
+        self.cameraPreview.setText("카메라 미리보기")
+        self.scanToggleButton.setText("QR 스캔 시작")
+        self._scan_active = False
+
+    def _on_scan_toggle(self):
+        if self._scan_active:
+            self._stop_camera()
+            self.resultLabel.setText(
+                "송장 QR을 카메라에 비춰 주세요. 스캔 시작 버튼을 누른 뒤 QR을 인식하면 자동으로 입고 처리됩니다."
+            )
+            return
+        try:
+            self._camera_thread = CameraQRThread(self)
+        except Exception as e:
+            self.resultLabel.setText(f"카메라를 사용할 수 없습니다: {e}")
+            return
+
+        def on_frame(qimg: QImage):
+            pix = QPixmap.fromImage(qimg)
+            self.cameraPreview.setPixmap(
+                pix.scaled(
+                    self.cameraPreview.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+
+        def on_qr(data: str):
+            payload = _parse_qr_payload(data)
+            if not payload:
+                self.resultLabel.setText("인식된 QR 형식을 처리할 수 없습니다.")
+                return
+            order_id = payload.get("order_id")
+            order_item_id = payload.get("order_item_id")
+            if order_id is None and order_item_id is None:
+                self.resultLabel.setText(
+                    "QR에 주문 정보가 없습니다. (order_id 또는 order_item_id 필요)"
+                )
+                return
+            try:
+                if order_id is not None:
+                    order_mark_delivered(order_id=int(order_id))
+                else:
+                    order_mark_delivered(order_item_id=int(order_item_id))
+                self.resultLabel.setText("입고 처리되었습니다.")
+                self.on_order_delivered()
+            except RuntimeError as e:
+                err = str(e)
+                if "이미 입고한" in err:
+                    self.resultLabel.setText("이미 입고한 주문입니다.")
+                else:
+                    self.resultLabel.setText(f"처리 실패: {err}")
+            except (TimeoutError, OSError, ConnectionError) as e:
+                self.resultLabel.setText(
+                    f"서버 연결 실패. 서버가 실행 중인지 확인하세요.\n{e!s}"
+                )
+
+        self._camera_thread.frame_ready.connect(on_frame)
+        self._camera_thread.qr_decoded.connect(on_qr)
+        self._camera_thread.start()
+        self.scanToggleButton.setText("QR 스캔 중지")
+        self.resultLabel.setText("QR을 카메라에 비춰 주세요…")
+        self._scan_active = True
+
+    def reject(self):
+        self._stop_camera()
+        super().reject()
+
+    def closeEvent(self, event):
+        self._stop_camera()
+        super().closeEvent(event)
+
+
 def setup_worker_screen(window, stacked) -> None:
     """작업자 화면: 사이드바(주문 관리 메뉴), 주문 관리 페이지(송장 QR → 주문 delivered)."""
     worker = window.page_worker
@@ -129,7 +253,7 @@ def setup_worker_screen(window, stacked) -> None:
     def on_menu_classify_clicked():
         if worker.menu_classify.isChecked():
             worker.menu_inbound.setChecked(False)
-            stack.setCurrentIndex(2)  # page_classify
+            stack.setCurrentIndex(3)  # page_classify (0=welcome, 1=inbound, 2=order_detail, 3=classify)
             _refresh_classify_list()
         else:
             stack.setCurrentIndex(0)  # page_welcome
@@ -137,74 +261,113 @@ def setup_worker_screen(window, stacked) -> None:
     worker.menu_inbound.clicked.connect(on_menu_inbound_clicked)
     worker.menu_classify.clicked.connect(on_menu_classify_clicked)
 
-    # ----- 주문 관리 페이지: 카메라 + 송장 QR 스캔 -----
-    camera_thread: CameraQRThread | None = None
-    scan_active = False
+    _inbound_orders_list: list[dict] = []
 
-    def on_scan_toggle():
-        nonlocal camera_thread, scan_active
-        if scan_active:
-            if camera_thread and camera_thread.isRunning():
-                camera_thread.stop()
-                camera_thread.wait(3000)
-            worker.cameraPreview.clear()
-            worker.cameraPreview.setText("카메라 미리보기")
-            worker.scanToggleButton.setText("QR 스캔 시작")
-            worker.inboundResultLabel.setText(
-                "송장 QR을 카메라에 비춰 주세요. 스캔 시작 버튼을 누른 뒤 QR을 인식하면 자동으로 입고 처리됩니다."
-            )
-            scan_active = False
-            return
-        # 시작
+    def _qty_by_code(items: list[dict], code: str) -> int:
+        return sum(
+            it.get("expected_qty", 0) or 0
+            for it in items
+            if (it.get("item_code") or "").strip().upper() == code.upper()
+        )
+
+    def _refresh_inbound_order_list():
+        """주문 목록 테이블 갱신 (주문 ID, 주문일, 입고 여부, 1L, 2L)."""
+        nonlocal _inbound_orders_list
         try:
-            camera_thread = CameraQRThread(worker)
-        except Exception as e:
-            worker.inboundResultLabel.setText(f"카메라를 사용할 수 없습니다: {e}")
-            return
-
-        def on_frame(qimg: QImage):
-            pix = QPixmap.fromImage(qimg)
-            worker.cameraPreview.setPixmap(
-                pix.scaled(
-                    worker.cameraPreview.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+            _inbound_orders_list = list_orders()
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            _inbound_orders_list = []
+            worker.orderTable.setRowCount(0)
+            worker.orderTable.setHorizontalHeaderLabels(
+                ["주문 ID", "주문일", "입고 여부", "1L", "2L"]
             )
+            return
+        worker.orderTable.setHorizontalHeaderLabels(
+            ["주문 ID", "주문일", "입고 여부", "1L", "2L"]
+        )
+        worker.orderTable.setRowCount(0)
+        flags_ro = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        for o in _inbound_orders_list:
+            row = worker.orderTable.rowCount()
+            worker.orderTable.insertRow(row)
+            oid = o.get("order_id")
+            date_str = (o.get("order_date") or "")[:10]
+            status = (o.get("status") or "").strip().upper()
+            입고_str = "입고됨" if status == "DELIVERED" else "대기"
+            items = o.get("items") or []
+            qty_1l = _qty_by_code(items, "1L")
+            qty_2l = _qty_by_code(items, "2L")
+            worker.orderTable.setItem(row, 0, QTableWidgetItem(str(oid)))
+            worker.orderTable.item(row, 0).setData(Qt.ItemDataRole.UserRole, oid)
+            worker.orderTable.setItem(row, 1, QTableWidgetItem(date_str))
+            worker.orderTable.setItem(row, 2, QTableWidgetItem(입고_str))
+            worker.orderTable.setItem(row, 3, QTableWidgetItem(str(qty_1l)))
+            worker.orderTable.setItem(row, 4, QTableWidgetItem(str(qty_2l)))
+            for c in range(5):
+                worker.orderTable.item(row, c).setFlags(flags_ro)
+        worker.orderTable.setColumnWidth(0, 72)   # 주문 ID
+        worker.orderTable.setColumnWidth(1, 150)   # 주문일 (넓게)
+        worker.orderTable.setColumnWidth(2, 100)   # 입고 여부 (넓게)
+        worker.orderTable.setColumnWidth(3, 44)    # 1L (좁게)
+        worker.orderTable.setColumnWidth(4, 44)    # 2L (좁게)
 
-        def on_qr(data: str):
-            payload = _parse_qr_payload(data)
-            if not payload:
-                worker.inboundResultLabel.setText("인식된 QR 형식을 처리할 수 없습니다.")
-                return
-            order_id = payload.get("order_id")
-            order_item_id = payload.get("order_item_id")
-            if order_id is None and order_item_id is None:
-                worker.inboundResultLabel.setText("QR에 주문 정보가 없습니다. (order_id 또는 order_item_id 필요)")
-                return
-            try:
-                if order_id is not None:
-                    order_mark_delivered(order_id=int(order_id))
-                else:
-                    order_mark_delivered(order_item_id=int(order_item_id))
-                worker.inboundResultLabel.setText("입고 처리되었습니다.")
-            except RuntimeError as e:
-                err = str(e)
-                if "이미 입고한" in err:
-                    worker.inboundResultLabel.setText("이미 입고한 주문입니다.")
-                else:
-                    worker.inboundResultLabel.setText(f"처리 실패: {err}")
-            except (TimeoutError, OSError, ConnectionError) as e:
-                worker.inboundResultLabel.setText(f"서버 연결 실패. 서버가 실행 중인지 확인하세요.\n{e!s}")
+    # 주문 관리 클릭 시 목록 갱신
+    def _on_menu_inbound_clicked_extra():
+        on_menu_inbound_clicked()
+        _refresh_inbound_order_list()
 
-        camera_thread.frame_ready.connect(on_frame)
-        camera_thread.qr_decoded.connect(on_qr)
-        camera_thread.start()
-        worker.scanToggleButton.setText("QR 스캔 중지")
-        worker.inboundResultLabel.setText("QR을 카메라에 비춰 주세요…")
-        scan_active = True
+    worker.menu_inbound.clicked.disconnect(on_menu_inbound_clicked)
+    worker.menu_inbound.clicked.connect(_on_menu_inbound_clicked_extra)
 
-    worker.scanToggleButton.clicked.connect(on_scan_toggle)
+    # ----- 주문 관리 페이지: 주문 입고 처리 버튼 → QR 스캔 팝업 -----
+    def on_inbound_scan_button():
+        dialog = InboundScanDialog(
+            parent=window,
+            on_order_delivered=_refresh_inbound_order_list,
+        )
+        dialog.exec()
+        _refresh_inbound_order_list()
+
+    worker.inboundScanButton.clicked.connect(on_inbound_scan_button)
+
+    # 주문 목록 행 클릭 → 상세 페이지로 이동 (품목 리스트 표시)
+    PAGE_ORDER_DETAIL = 2  # stack index
+
+    def on_order_row_clicked(row: int, _column: int):
+        if row < 0:
+            return
+        item0 = worker.orderTable.item(row, 0)
+        oid = item0.data(Qt.ItemDataRole.UserRole) if item0 else None
+        if oid is None:
+            return
+        order = next((o for o in _inbound_orders_list if o.get("order_id") == oid), None)
+        if not order:
+            return
+        worker.label_order_detail_title.setText(f"주문 상세 # {oid}")
+        worker.orderDetailTable.setHorizontalHeaderLabels(["품목명", "품목 코드", "수량"])
+        worker.orderDetailTable.setRowCount(0)
+        flags_ro = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        for it in order.get("items") or []:
+            # 품목명 = 서버에서 오는 product_name (브랜드 + 간장종류 + 용량)
+            product_name = it.get("product_name") or it.get("item_code") or "—"
+            code = it.get("item_code") or ""
+            r = worker.orderDetailTable.rowCount()
+            worker.orderDetailTable.insertRow(r)
+            worker.orderDetailTable.setItem(r, 0, QTableWidgetItem(product_name))
+            worker.orderDetailTable.setItem(r, 1, QTableWidgetItem(code))
+            worker.orderDetailTable.setItem(r, 2, QTableWidgetItem(str(it.get("expected_qty", 0))))
+            for c in range(3):
+                worker.orderDetailTable.item(r, c).setFlags(flags_ro)
+        worker.orderDetailTable.setColumnWidth(0, 180)
+        worker.orderDetailTable.setColumnWidth(1, 90)
+        stack.setCurrentIndex(PAGE_ORDER_DETAIL)
+
+    worker.orderTable.cellDoubleClicked.connect(on_order_row_clicked)
+
+    def on_order_detail_back():
+        stack.setCurrentIndex(1)  # page_inbound
+
+    worker.orderDetailBackButton.clicked.connect(on_order_detail_back)
 
     # ----- 분류하기 페이지: 공정 목록, 한 번에 하나만 시작/중지 -----
     _classify_processes: list[dict[str, Any]] = []
@@ -392,32 +555,12 @@ def setup_worker_screen(window, stacked) -> None:
     worker.classifyRefreshButton.clicked.connect(_refresh_classify_list)
 
     def stop_camera_if_leaving():
-        nonlocal scan_active, camera_thread
-        try:
-            if stacked.currentWidget() is not worker and scan_active:
-                if camera_thread and camera_thread.isRunning():
-                    camera_thread.stop()
-                    camera_thread.wait(2000)
-                scan_active = False
-        except Exception:
-            pass
+        # QR 스캔은 팝업 다이얼로그에서만 동작하므로 화면 전환 시 별도 정리 불필요
+        pass
 
     def stop_camera_if_switching_to_welcome(index: int):
-        nonlocal scan_active, camera_thread
-        if index != 1 and scan_active:  # 1 = page_inbound only
-            try:
-                if camera_thread and camera_thread.isRunning():
-                    camera_thread.stop()
-                    camera_thread.wait(2000)
-                scan_active = False
-                worker.cameraPreview.clear()
-                worker.cameraPreview.setText("카메라 미리보기")
-                worker.scanToggleButton.setText("QR 스캔 시작")
-                worker.inboundResultLabel.setText(
-                    "송장 QR을 카메라에 비춰 주세요. 스캔 시작 버튼을 누른 뒤 QR을 인식하면 자동으로 입고 처리됩니다."
-                )
-            except Exception:
-                pass
+        # QR 스캔은 팝업에서만 동작하므로 페이지 전환 시 별도 정리 불필요
+        pass
 
     stacked.currentChanged.connect(lambda _: stop_camera_if_leaving())
     stack.currentChanged.connect(stop_camera_if_switching_to_welcome)

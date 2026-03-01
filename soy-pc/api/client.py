@@ -351,6 +351,14 @@ def delete_worker(worker_id: int) -> None:
 # ----- 주문/입고 (작업자 화면 주문 관리, 인증 불필요) -----
 
 
+def list_orders() -> list[dict]:
+    """주문 목록 조회. 각 항목에 order_id, order_date, status, items 포함."""
+    ok, body, err = _request("list_orders", {})
+    if not ok:
+        raise RuntimeError(err or "주문 목록 조회 실패")
+    return body if isinstance(body, list) else []
+
+
 def get_order(order_id: int) -> dict:
     """주문 조회. 없으면 RuntimeError."""
     ok, body, err = _request("get_order", {"order_id": order_id})
