@@ -1,4 +1,4 @@
-"""최초 관리자 등록 — 서버에 admin이 없으면 비밀번호 등록 팝업 (서버 API 사용)."""
+"""최초 관리자 등록 — 첫 admin에 비밀번호가 없으면 비밀번호 등록 팝업 (서버 API 사용)."""
 import os
 
 from PyQt6 import uic
@@ -7,16 +7,16 @@ from PyQt6.QtWidgets import QDialog, QWidget
 
 from qfluentwidgets import MessageBox
 
-from api.client import admin_count, get_server_address, register_first_admin
+from api.client import first_admin_needs_password, get_server_address, register_first_admin
 
 
 def ensure_admin_registered(ui_dir: str, parent: QWidget | None = None) -> bool:
     """
-    서버를 통해 관리자 수 확인. 0명이면 최초 설정(비밀번호 등록) 팝업을 띄움.
-    등록 성공 또는 이미 admin이 있으면 True, 서버 연결 실패 시 False.
+    서버를 통해 첫 admin 비밀번호 필요 여부 확인. 필요하면 최초 설정(비밀번호 등록) 팝업을 띄움.
+    등록 성공 또는 이미 비밀번호가 설정되어 있으면 True, 서버 연결 실패 시 False.
     """
     try:
-        n = admin_count()
+        needs_password = first_admin_needs_password()
     except (ConnectionRefusedError, TimeoutError, OSError) as e:
         addr = get_server_address()
         w = MessageBox(
@@ -36,17 +36,17 @@ def ensure_admin_registered(ui_dir: str, parent: QWidget | None = None) -> bool:
     except Exception as e:
         w = MessageBox(
             "오류",
-            f"관리자 수 확인 중 오류가 발생했습니다.\n{e!s}",
+            f"관리자 설정 확인 중 오류가 발생했습니다.\n{e!s}",
             parent,
         )
         w.cancelButton.hide()
         w.yesButton.setText("확인")
         w.exec()
         return False
-    if n > 0:
+    if not needs_password:
         return True
 
-    # admin 0명 → 등록 팝업
+    # 첫 admin에 비밀번호 없음 → 등록 팝업
     while True:
         dialog = QDialog(parent)
         uic.loadUi(

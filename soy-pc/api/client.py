@@ -223,7 +223,8 @@ def _request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
     body = dict(body)
     with _auth_token_lock:
         tok = _auth_token
-    if tok and action != "admin_login":
+    # 인증 불필요 액션에는 auth_token 붙이지 않음
+    if tok and action not in ("admin_login", "first_admin_needs_password", "register_first_admin"):
         body["auth_token"] = tok
     req_id = _next_id()
     ev = threading.Event()
@@ -264,6 +265,16 @@ def admin_count() -> int:
     if body is not None and isinstance(body, dict) and "count" in body:
         return int(body["count"])
     return 0
+
+
+def first_admin_needs_password() -> bool:
+    """첫 번째 admin에 비밀번호가 없으면 True (초기 설정 팝업 표시용)."""
+    ok, body, err = _request("first_admin_needs_password", {})
+    if not ok:
+        raise RuntimeError(err or "first_admin_needs_password failed")
+    if body is not None and isinstance(body, dict) and "needs_password" in body:
+        return bool(body["needs_password"])
+    return False
 
 
 def register_first_admin(password: str) -> None:

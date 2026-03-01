@@ -21,7 +21,9 @@ class Admin(Base):
     admin_id: Mapped[int] = mapped_column(
         "admin_id", Integer, primary_key=True, autoincrement=True
     )
-    password_hash: Mapped[str] = mapped_column("password_hash", String(255), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(
+        "password_hash", String(255), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         "created_at", DateTime, nullable=False, default=_utcnow
     )

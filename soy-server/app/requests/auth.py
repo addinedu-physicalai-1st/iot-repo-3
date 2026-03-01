@@ -3,7 +3,7 @@ import uuid
 from typing import Any, Callable
 
 from app.services import workers
-from app.auth import create_first_admin, verify_admin_password
+from app.auth import first_admin_needs_password, set_first_admin_password, verify_admin_password
 
 Result = tuple[bool, Any, str]
 
@@ -15,7 +15,8 @@ def handle(
     session_add: Callable[[str, int], None],
     session_remove: Callable[[str], None],
 ) -> Result | None:
-    """admin_login, admin_logout, admin_count, register_first_admin."""
+    """admin_login, admin_logout, admin_count, first_admin_needs_password, register_first_admin."""
+    action = (action or "").strip() if isinstance(action, str) else str(action or "")
     if action == "admin_login":
         password = (body.get("password") or "").strip()
         if not password:
@@ -36,6 +37,9 @@ def handle(
     if action == "admin_count":
         n = workers.count_admins()
         return (True, {"count": n}, "")
+    if action == "first_admin_needs_password":
+        need = first_admin_needs_password()
+        return (True, {"needs_password": need}, "")
     if action == "register_first_admin":
         password = (body.get("password") or "").strip()
         if not password:
@@ -43,7 +47,7 @@ def handle(
         if len(password) < 4:
             return (False, None, "비밀번호는 4자 이상으로 설정하세요.")
         try:
-            create_first_admin(password)
+            set_first_admin_password(password)
             return (True, None, "")
         except ValueError as e:
             return (False, None, str(e))
