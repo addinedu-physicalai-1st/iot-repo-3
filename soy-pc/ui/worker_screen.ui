@@ -99,6 +99,30 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="menu_warehouse">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>44</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>16</pointsize>
+         </font>
+        </property>
+        <property name="text">
+         <string>창고 현황</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="verticalSpacer_worker_sidebar">
         <property name="orientation">
          <enum>Qt::Orientation::Vertical</enum>
@@ -566,6 +590,258 @@
          <property name="wordWrap">
           <bool>true</bool>
          </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_warehouse">
+      <property name="objectName">
+       <string>page_warehouse</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_warehouse">
+       <property name="spacing">
+        <number>16</number>
+       </property>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_warehouse_header">
+         <item>
+          <widget class="QLabel" name="label_warehouse_title">
+           <property name="font">
+            <font>
+             <pointsize>18</pointsize>
+             <weight>75</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="text">
+            <string>창고 현황</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="warehouseRefreshButton">
+           <property name="objectName">
+            <string>warehouseRefreshButton</string>
+           </property>
+           <property name="text">
+            <string>새로고침</string>
+           </property>
+           <property name="minimumHeight">
+            <number>36</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_warehouse">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QFrame" name="warehouse_chart_card">
+         <property name="objectName">
+          <string>warehouse_chart_card</string>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>280</height>
+          </size>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_warehouse_chart">
+          <property name="spacing">
+           <number>24</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_bar_1l">
+            <item>
+             <widget class="QLabel" name="label_warehouse_1l">
+              <property name="minimumWidth">
+               <number>100</number>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="text">
+               <string>1L</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QProgressBar" name="progressBar_1l">
+              <property name="objectName">
+               <string>progressBar_1l</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>44</height>
+               </size>
+              </property>
+              <property name="maximum">
+               <number>100</number>
+              </property>
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="textVisible">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_warehouse_1l_count">
+              <property name="minimumWidth">
+               <number>56</number>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="text">
+               <string>0/10</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_bar_2l">
+            <item>
+             <widget class="QLabel" name="label_warehouse_2l">
+              <property name="minimumWidth">
+               <number>100</number>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="text">
+               <string>2L</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QProgressBar" name="progressBar_2l">
+              <property name="objectName">
+               <string>progressBar_2l</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>44</height>
+               </size>
+              </property>
+              <property name="maximum">
+               <number>100</number>
+              </property>
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="textVisible">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_warehouse_2l_count">
+              <property name="minimumWidth">
+               <number>56</number>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="text">
+               <string>0/10</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_bar_unclassified">
+            <item>
+             <widget class="QLabel" name="label_warehouse_unclassified">
+              <property name="minimumWidth">
+               <number>100</number>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="text">
+               <string>미분류</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QProgressBar" name="progressBar_unclassified">
+              <property name="objectName">
+               <string>progressBar_unclassified</string>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>44</height>
+               </size>
+              </property>
+              <property name="maximum">
+               <number>100</number>
+              </property>
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="textVisible">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_warehouse_unclassified_count">
+              <property name="minimumWidth">
+               <number>56</number>
+              </property>
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+               </font>
+              </property>
+              <property name="text">
+               <string>0/10</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
         </widget>
        </item>
       </layout>

@@ -43,4 +43,6 @@ def handle(action: str, body: dict[str, Any]) -> Result | None:
             return (True, out, "")
         except processes_module.ProcessNotFound:
             return (False, None, "공정을 찾을 수 없습니다.")
+        except processes_module.ProcessQtyExceedsOrderTotal as e:
+            return (False, None, str(e))
     return None

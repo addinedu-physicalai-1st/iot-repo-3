@@ -34,9 +34,12 @@ def get_order(order_id: int, engine: Engine | None = None) -> dict | None:
 def list_orders(engine: Engine | None = None) -> list[dict]:
     """전체 주문 목록 조회. 각 주문에 order_items 포함(품목명=브랜드+종류+용량). order_id 오름차순."""
     with get_session() as session:
-        # item_code -> 물품명(브랜드 + 종류 + 용량)
-        rows = session.execute(text("SELECT item_code, name FROM products")).fetchall()
+        # item_code -> 물품명, 용량(1L/2L 등, 주문관리 1L·2L 컬럼 집계용)
+        rows = session.execute(
+            text("SELECT item_code, name, COALESCE(capacity, '') FROM products")
+        ).fetchall()
         product_names = {row[0]: row[1] for row in rows} if rows else {}
+        product_capacity = {row[0]: (row[2] or "").strip() for row in rows} if rows else {}
 
         orders_query = session.query(Order).order_by(Order.order_id.asc())
         result = []
@@ -47,6 +50,7 @@ def list_orders(engine: Engine | None = None) -> list[dict]:
                     "item_code": oi.item_code or "",
                     "expected_qty": oi.expected_qty or 0,
                     "product_name": product_names.get(oi.item_code, oi.item_code or ""),
+                    "capacity": product_capacity.get(oi.item_code, ""),
                 }
                 for oi in order.order_items
             ]

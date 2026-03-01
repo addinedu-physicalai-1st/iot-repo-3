@@ -239,6 +239,9 @@ def setup_worker_screen(window, stacked) -> None:
     welcome_page = stack.widget(0)
     if welcome_page.layout():
         welcome_page.layout().setContentsMargins(32, 32, 32, 32)
+    warehouse_page = stack.widget(4)  # page_warehouse
+    if warehouse_page.layout():
+        warehouse_page.layout().setContentsMargins(32, 32, 32, 32)
     card = worker.findChild(QFrame, "welcome_card")
     if card and card.layout():
         card.layout().setContentsMargins(40, 40, 40, 40)
@@ -246,6 +249,7 @@ def setup_worker_screen(window, stacked) -> None:
     def on_menu_inbound_clicked():
         if worker.menu_inbound.isChecked():
             worker.menu_classify.setChecked(False)
+            worker.menu_warehouse.setChecked(False)
             stack.setCurrentIndex(1)  # page_inbound
         else:
             stack.setCurrentIndex(0)  # page_welcome
@@ -253,22 +257,46 @@ def setup_worker_screen(window, stacked) -> None:
     def on_menu_classify_clicked():
         if worker.menu_classify.isChecked():
             worker.menu_inbound.setChecked(False)
-            stack.setCurrentIndex(3)  # page_classify (0=welcome, 1=inbound, 2=order_detail, 3=classify)
+            worker.menu_warehouse.setChecked(False)
+            stack.setCurrentIndex(3)  # page_classify (0=welcome, 1=inbound, 2=order_detail, 3=classify, 4=warehouse)
             _refresh_classify_list()
+        else:
+            stack.setCurrentIndex(0)  # page_welcome
+
+    PAGE_WAREHOUSE = 4
+
+    def on_menu_warehouse_clicked():
+        if worker.menu_warehouse.isChecked():
+            worker.menu_inbound.setChecked(False)
+            worker.menu_classify.setChecked(False)
+            stack.setCurrentIndex(PAGE_WAREHOUSE)
+            _refresh_warehouse_chart()
         else:
             stack.setCurrentIndex(0)  # page_welcome
 
     worker.menu_inbound.clicked.connect(on_menu_inbound_clicked)
     worker.menu_classify.clicked.connect(on_menu_classify_clicked)
+    worker.menu_warehouse.clicked.connect(on_menu_warehouse_clicked)
 
     _inbound_orders_list: list[dict] = []
 
-    def _qty_by_code(items: list[dict], code: str) -> int:
-        return sum(
-            it.get("expected_qty", 0) or 0
-            for it in items
-            if (it.get("item_code") or "").strip().upper() == code.upper()
-        )
+    def _qty_by_capacity(items: list[dict], capacity: str) -> int:
+        """용량(1L, 2L 등)으로 주문 품목 수량 합계. capacity는 서버 products 기준, 없으면 item_code 접미사(_1l, _2l)로 판별."""
+        cap_upper = (capacity or "").strip().upper()
+        total = 0
+        for it in items:
+            qty = it.get("expected_qty", 0) or 0
+            item_cap = (it.get("capacity") or "").strip().upper()
+            if item_cap and item_cap == cap_upper:
+                total += qty
+                continue
+            # 서버가 capacity를 안 주는 경우: item_code 접미사로 판별 (예: sampyo_jin_1l → 1L)
+            code = (it.get("item_code") or "").strip().upper()
+            if code.endswith("_1L") and cap_upper == "1L":
+                total += qty
+            elif code.endswith("_2L") and cap_upper == "2L":
+                total += qty
+        return total
 
     def _refresh_inbound_order_list():
         """주문 목록 테이블 갱신 (주문 ID, 주문일, 입고 여부, 1L, 2L)."""
@@ -295,8 +323,8 @@ def setup_worker_screen(window, stacked) -> None:
             status = (o.get("status") or "").strip().upper()
             입고_str = "입고됨" if status == "DELIVERED" else "대기"
             items = o.get("items") or []
-            qty_1l = _qty_by_code(items, "1L")
-            qty_2l = _qty_by_code(items, "2L")
+            qty_1l = _qty_by_capacity(items, "1L")
+            qty_2l = _qty_by_capacity(items, "2L")
             worker.orderTable.setItem(row, 0, QTableWidgetItem(str(oid)))
             worker.orderTable.item(row, 0).setData(Qt.ItemDataRole.UserRole, oid)
             worker.orderTable.setItem(row, 1, QTableWidgetItem(date_str))
@@ -430,6 +458,7 @@ def setup_worker_screen(window, stacked) -> None:
                 it7 = QTableWidgetItem(str(uncl))
                 it7.setFlags(flags_ed)
                 worker.processTable.setItem(row, 7, it7)
+                worker.processTable.setRowHeight(row, 52)
         finally:
             worker.processTable.blockSignals(False)
         # 시각 컬럼·수량 컬럼 너비 고정
@@ -438,11 +467,46 @@ def setup_worker_screen(window, stacked) -> None:
         worker.processTable.setColumnWidth(5, 50)
         worker.processTable.setColumnWidth(6, 50)
         worker.processTable.setColumnWidth(7, 55)
+        worker.processTable.verticalHeader().setDefaultSectionSize(52)  # 행 높이 (입력란 잘리지 않도록)
         if running:
             worker.label_running_status.setText(f"현재 진행 중: 공정 #{running['process_id']} (주문 #{running['order_id']})")
         else:
             worker.label_running_status.setText("현재 진행 중: 없음")
         _classify_update_toggle_button()
+
+    WAREHOUSE_TOTAL = 10  # 창고 현황 총량 기준 (N/10 형식)
+
+    def _refresh_warehouse_chart():
+        """공정 목록에서 1L·2L·미분류 합계를 구해 막대 그래프에 반영. 총량 10 기준 N/10 표시."""
+        try:
+            processes = list_processes()
+        except (TimeoutError, OSError, ConnectionError, RuntimeError):
+            worker.label_warehouse_1l_count.setText("—")
+            worker.label_warehouse_2l_count.setText("—")
+            worker.label_warehouse_unclassified_count.setText("—")
+            worker.progressBar_1l.setMaximum(WAREHOUSE_TOTAL)
+            worker.progressBar_1l.setValue(0)
+            worker.progressBar_2l.setMaximum(WAREHOUSE_TOTAL)
+            worker.progressBar_2l.setValue(0)
+            worker.progressBar_unclassified.setMaximum(WAREHOUSE_TOTAL)
+            worker.progressBar_unclassified.setValue(0)
+            return
+        total_1l = sum(p.get("success_1l_qty", 0) or 0 for p in processes)
+        total_2l = sum(p.get("success_2l_qty", 0) or 0 for p in processes)
+        total_uncl = sum(p.get("unclassified_qty", 0) or 0 for p in processes)
+        worker.label_warehouse_1l_count.setText(f"{total_1l}/{WAREHOUSE_TOTAL}")
+        worker.label_warehouse_2l_count.setText(f"{total_2l}/{WAREHOUSE_TOTAL}")
+        worker.label_warehouse_unclassified_count.setText(f"{total_uncl}/{WAREHOUSE_TOTAL}")
+        worker.progressBar_1l.setMaximum(WAREHOUSE_TOTAL)
+        worker.progressBar_1l.setValue(min(total_1l, WAREHOUSE_TOTAL))
+        worker.progressBar_2l.setMaximum(WAREHOUSE_TOTAL)
+        worker.progressBar_2l.setValue(min(total_2l, WAREHOUSE_TOTAL))
+        worker.progressBar_unclassified.setMaximum(WAREHOUSE_TOTAL)
+        worker.progressBar_unclassified.setValue(min(total_uncl, WAREHOUSE_TOTAL))
+
+    worker.warehouseRefreshButton.clicked.connect(_refresh_warehouse_chart)
+    for bar in (worker.progressBar_1l, worker.progressBar_2l, worker.progressBar_unclassified):
+        bar.setTextVisible(False)  # 오른쪽 "N개" 라벨만 표시
 
     def _classify_update_toggle_button():
         """선택된 공정에 따라 [시작]/[중지] 버튼 문구·활성화."""
@@ -516,6 +580,37 @@ def setup_worker_screen(window, stacked) -> None:
             worker.processTable.blockSignals(False)
             worker.classifyResultLabel.setText("1L, 2L, 미분류에는 0 이상의 숫자만 입력하세요.")
             return
+        p = next((x for x in _classify_processes if x.get("process_id") == pid), None)
+        if not p:
+            return
+        # 수정 후 1L+2L+미분류 합이 해당 주문 총량을 넘지 않도록 검사
+        def _cell_int(r: int, c: int) -> int:
+            it = worker.processTable.item(r, c)
+            if not it:
+                return 0
+            try:
+                return int((it.text() or "0").strip())
+            except ValueError:
+                return 0
+
+        new_1l = val if col == 5 else _cell_int(row, 5)
+        new_2l = val if col == 6 else _cell_int(row, 6)
+        new_uncl = val if col == 7 else _cell_int(row, 7)
+        order_total = p.get("order_total_qty")
+        if order_total is not None and (new_1l + new_2l + new_uncl) > order_total:
+            worker.processTable.blockSignals(True)
+            old = (
+                p.get("success_1l_qty", 0) if col == 5
+                else p.get("success_2l_qty", 0) if col == 6
+                else p.get("unclassified_qty", 0)
+            )
+            item.setText(str(old))
+            worker.processTable.blockSignals(False)
+            worker.classifyResultLabel.setText(
+                f"1L+2L+미분류 합계({new_1l + new_2l + new_uncl})가 해당 주문 총 수량({order_total})을 초과할 수 없습니다."
+            )
+            return
+
         field = {5: "success_1l_qty", 6: "success_2l_qty", 7: "unclassified_qty"}[col]
         try:
             process_update(int(pid), **{field: val})

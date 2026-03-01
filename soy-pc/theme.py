@@ -230,7 +230,8 @@ QWidget#WorkerScreen QFrame#worker_sidebar QLabel#label_worker_menuTitle {{
   padding: 12px 0 8px 0;
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound,
-QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_warehouse {{
   background-color: transparent;
   color: {TEXT_PRIMARY};
   border: none;
@@ -242,11 +243,13 @@ QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify {{
   margin-bottom: 4px;
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:hover,
-QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:hover {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:hover,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_warehouse:hover {{
   background-color: {BG_BUTTON};
 }}
 QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:checked,
-QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:checked {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:checked,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_warehouse:checked {{
   background-color: {ACCENT_SOFT};
   color: {ACCENT_HOVER};
   font-weight: 600;
@@ -277,6 +280,24 @@ QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_hint {{
   color: {TEXT_SECONDARY};
   font-size: 15px;
 }}
+/* 창고 현황 — 막대 그래프 카드 */
+QWidget#WorkerScreen QFrame#warehouse_chart_card {{
+  background-color: {BG_CARD};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+}}
+/* 창고 현황 — 프로그레스 바: 회색 10칸 배경 위에 색이 차오르는 스타일 */
+QWidget#WorkerScreen QFrame#warehouse_chart_card QProgressBar {{
+  background-color: #d8d6d2;
+  border: none;
+  border-radius: 10px;
+  min-height: 44px;
+  text-align: center;
+}}
+QWidget#WorkerScreen QFrame#warehouse_chart_card QProgressBar::chunk {{
+  background-color: {ACCENT};
+  border-radius: 10px;
+}}
 /* 분류하기 — 공정 목록 테이블 (관리자 작업자 테이블과 동일 스타일) */
 QWidget#WorkerScreen QTableWidget {{
   background-color: {BG_CARD};
@@ -303,6 +324,15 @@ QWidget#WorkerScreen QTableWidget QHeaderView::section {{
 }}
 QWidget#WorkerScreen QTableWidget QHeaderView::section:last {{
   border-right: none;
+}}
+/* 분류하기 — 셀 편집 시 나타나는 입력창: 글자 대비 확보 */
+QWidget#WorkerScreen QTableWidget QLineEdit {{
+  background-color: {BG_CARD};
+  color: {TEXT_PRIMARY};
+  border: 1px solid {BORDER};
+  padding: 6px 10px;
+  selection-background-color: {ACCENT_SOFT};
+  selection-color: {TEXT_PRIMARY};
 }}
 
 /* ========== 관리자 화면 (사이드바 + 콘텐츠) ========== */

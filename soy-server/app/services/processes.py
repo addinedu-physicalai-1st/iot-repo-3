@@ -10,7 +10,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.engine import Engine
 
 from app.database import get_session
-from app.models import Process
+from app.models import Order, Process
 
 logger = logging.getLogger(__name__)
 
@@ -20,28 +20,48 @@ NOT_STARTED = "NOT_STARTED"
 
 
 def list_processes(engine: Engine | None = None) -> list[dict[str, Any]]:
-    """process_id 내림차순(최신 먼저)으로 공정 목록 반환."""
+    """process_id 내림차순(최신 먼저)으로 공정 목록 반환.
+    order_total_qty: 해당 주문(order_id)의 items 총 수량(1L+2L+미분류 상한)."""
     with get_session() as session:
         stmt = select(Process).order_by(desc(Process.process_id))
         rows = session.execute(stmt).scalars().all()
-        return [
-            {
-                "process_id": p.process_id,
-                "order_id": p.order_id,
-                "start_time": p.start_time.isoformat() if p.start_time else None,
-                "end_time": p.end_time.isoformat() if p.end_time else None,
-                "status": (p.status or "").strip().upper(),
-                "total_qty": p.total_qty,
-                "success_1l_qty": p.success_1l_qty,
-                "success_2l_qty": p.success_2l_qty,
-                "unclassified_qty": p.unclassified_qty,
-            }
-            for p in rows
-        ]
+        result = []
+        for p in rows:
+            order = session.get(Order, p.order_id)
+            order_total_qty = (
+                sum(oi.expected_qty or 0 for oi in order.order_items) if order else 0
+            )
+            result.append(
+                {
+                    "process_id": p.process_id,
+                    "order_id": p.order_id,
+                    "start_time": p.start_time.isoformat() if p.start_time else None,
+                    "end_time": p.end_time.isoformat() if p.end_time else None,
+                    "status": (p.status or "").strip().upper(),
+                    "total_qty": p.total_qty,
+                    "success_1l_qty": p.success_1l_qty,
+                    "success_2l_qty": p.success_2l_qty,
+                    "unclassified_qty": p.unclassified_qty,
+                    "order_total_qty": order_total_qty,
+                }
+            )
+        return result
 
 
 class ProcessNotFound(Exception):
     pass
+
+
+class ProcessQtyExceedsOrderTotal(Exception):
+    """1L+2L+미분류 합계가 해당 주문의 items 총량을 초과할 때."""
+
+    def __init__(self, order_id: int, order_total: int, requested_total: int):
+        self.order_id = order_id
+        self.order_total = order_total
+        self.requested_total = requested_total
+        super().__init__(
+            f"1L+2L+미분류 합계({requested_total})가 주문 #{order_id} 총 수량({order_total})을 초과할 수 없습니다."
+        )
 
 
 def _get_running_process(session) -> Process | None:
@@ -104,7 +124,8 @@ def update_process(
     unclassified_qty: int | None = None,
     engine: Engine | None = None,
 ) -> dict[str, Any]:
-    """공정 수량(1L, 2L, 미분류)만 갱신. None인 필드는 변경하지 않음."""
+    """공정 수량(1L, 2L, 미분류)만 갱신. None인 필드는 변경하지 않음.
+    갱신 후 1L+2L+미분류 합계가 해당 주문(order_id)의 items 총량을 초과하면 ProcessQtyExceedsOrderTotal."""
     with get_session() as session:
         process = session.get(Process, process_id)
         if not process:
@@ -116,6 +137,21 @@ def update_process(
         if unclassified_qty is not None:
             process.unclassified_qty = max(0, unclassified_qty)
         session.flush()
+
+        # 해당 주문의 items 총량 초과 여부 검사
+        order = session.get(Order, process.order_id)
+        if order:
+            order_total = sum(oi.expected_qty or 0 for oi in order.order_items)
+            classified_total = (
+                process.success_1l_qty + process.success_2l_qty + process.unclassified_qty
+            )
+            if classified_total > order_total:
+                raise ProcessQtyExceedsOrderTotal(
+                    order_id=process.order_id,
+                    order_total=order_total,
+                    requested_total=classified_total,
+                )
+
         logger.info(
             "process_id=%s updated 1l=%s 2l=%s uncl=%s",
             process_id,
