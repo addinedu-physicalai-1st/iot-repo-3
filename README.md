@@ -75,15 +75,7 @@ docker compose up -d
 - **SoyServer TCP**: `localhost:9001` — Soy-PC(관리자 UI)가 Worker CRUD·card_read 푸시에 사용. **soy-pc 실행 전에 서버가 떠 있어야 함.**
 - **Adminer** (DB 스키마 조회): http://localhost:8080 — 자동 로그인(soydb), 로컬/내부용만 사용 권장
 - 로컬에서 마이그레이션만 수동 실행: `cd soy-server && uv run alembic upgrade head` (상세는 [soy-db/README.md](soy-db/README.md) 참고)
-- **아두이노 시리얼(RFID 등)**  
-  - **Linux**: `.env` 에 `SERIAL_DEVICE=/dev/ttyUSB0` 또는 `/dev/ttyACM0` 설정 후 `docker compose up -d`.  
-  - **macOS**: Docker에서 호스트 `/dev/cu.*` 직접 전달이 불안정할 수 있어 **socat** 사용 권장.  
-    1. `brew install socat`  
-    2. 시리얼 연결 후 `ls /dev/cu.usb*` 로 경로 확인 (예: `/dev/cu.usbmodem101`)  
-    3. 터미널에서: `socat TCP-LISTEN:2000,reuseaddr,fork FILE:/dev/cu.usbmodem101,raw,echo=0` (백그라운드로 실행)  
-    4. `.env` 에 `SOY_REGISTER_SERIAL_PORT=socket://host.docker.internal:2000` 설정  
-    5. `docker compose up -d`  
-  - 시리얼 없이 서버만 기동: `.env` 에서 `SERIAL_DEVICE`·`SOY_REGISTER_SERIAL_PORT` 를 비우고 `docker compose up -d` (worker 카드 등록만 비활성).
+- **아두이노 시리얼(RFID 등) 사용 시 (Linux)**: 아두이노 USB 연결 후, 프로젝트 루트 `.env` 에 `SERIAL_DEVICE=/dev/ttyUSB0` 또는 `/dev/ttyACM0` 설정하고 `docker compose up -d` 로 기동. **시리얼을 연결하지 않을 때도 서버만 기동하려면** `./scripts/compose-up.sh up -d` 를 사용하면 됨 (디바이스 없을 때 경고만 띄우고 서버는 정상 동작, worker 등록만 비활성).
 
 ### soy-pc (관리자 UI)
 
