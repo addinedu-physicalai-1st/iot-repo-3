@@ -63,6 +63,23 @@ services:
       mysql:
         condition: service_healthy
     restart: unless-stopped
+  access-controller:
+    build:
+      context: .
+      dockerfile: access-controller/Dockerfile
+    container_name: micro-ros-esp32
+    # --- 아래 설정을 추가하세요 ---
+    tty: true          # 터미널(TTY)을 활성화하여 컨테이너가 유지되게 함
+    stdin_open: true   # 표준 입력을 열어둠 (docker run -it의 -i 역할)
+    # ----------------------------
+    network_mode: "host"
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - ./access-controller:/root/microros/firmware/freertos_apps/apps/FactoryDoor_service
+    environment:
+      - ROS_DOMAIN_ID=25
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/disable_shm.xml
 
 
 volumes:
