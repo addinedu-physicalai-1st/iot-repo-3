@@ -111,25 +111,3 @@ class Process(Base):
     unclassified_qty: Mapped[int] = mapped_column("unclassified_qty", Integer, nullable=False, default=0)
 
     order: Mapped["Order"] = relationship("Order", back_populates="processes")
-
-class AccessLog(Base):
-    __tablename__ = "access_logs"
-
-    access_log_id: Mapped[int] = mapped_column(
-        "access_log_id", Integer, primary_key=True, autoincrement=True
-    )
-    # workers 테이블의 worker_id를 참조하는 외래키
-    worker_id: Mapped[int] = mapped_column(
-        "worker_id", Integer, ForeignKey("workers.worker_id", ondelete="CASCADE"), nullable=False
-    )
-    # 출입 시간 (기존 모델의 _utcnow 함수 활용)
-    checked_at: Mapped[datetime] = mapped_column(
-        "checked_at", DateTime, nullable=False, default=_utcnow
-    )
-    # 출입 방향 (enter / exit)
-    direction: Mapped[str] = mapped_column(
-        "direction", String(20), nullable=False
-    )
-
-    # (선택사항) 필요 시 Worker 객체와 관계 설정
-    # worker: Mapped["Worker"] = relationship("Worker")
