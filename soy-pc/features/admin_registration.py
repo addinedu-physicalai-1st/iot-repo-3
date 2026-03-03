@@ -1,4 +1,5 @@
 """최초 관리자 등록 — 첫 admin에 비밀번호가 없으면 비밀번호 등록 팝업 (서버 API 사용)."""
+
 import os
 
 from PyQt6 import uic
@@ -7,7 +8,11 @@ from PyQt6.QtWidgets import QDialog, QWidget
 
 from qfluentwidgets import MessageBox
 
-from api.client import first_admin_needs_password, get_server_address, register_first_admin
+from api.client import (
+    first_admin_needs_password,
+    get_server_address,
+    register_first_admin,
+)
 
 
 def ensure_admin_registered(ui_dir: str, parent: QWidget | None = None) -> bool:
@@ -23,7 +28,7 @@ def ensure_admin_registered(ui_dir: str, parent: QWidget | None = None) -> bool:
             "서버 연결 실패",
             "soy-server TCP에 연결할 수 없습니다.\n\n"
             f"연결 주소: {addr}\n"
-            f"(HTTP 8000이 아닌 TCP 9001 포트입니다.)\n\n"
+            f"(HTTP 8003이 아닌 TCP 9001 포트입니다.)\n\n"
             "서버가 떠 있어도 TCP 9001이 열려 있어야 합니다.\n"
             "서버 로그에 '[TCP] listening on port 9001' 이 있는지 확인하세요.\n\n"
             f"상세: {e!s}",
@@ -67,7 +72,9 @@ def ensure_admin_registered(ui_dir: str, parent: QWidget | None = None) -> bool:
                 dialog.lineEdit_password.setFocus()
                 return
             if len(pw) < 4:
-                box = MessageBox("입력 오류", "비밀번호는 4자 이상으로 설정하세요.", dialog)
+                box = MessageBox(
+                    "입력 오류", "비밀번호는 4자 이상으로 설정하세요.", dialog
+                )
                 box.cancelButton.hide()
                 box.yesButton.setText("확인")
                 box.exec()
@@ -83,13 +90,17 @@ def ensure_admin_registered(ui_dir: str, parent: QWidget | None = None) -> bool:
                 return
             try:
                 register_first_admin(pw)
-                box = MessageBox("등록 완료", "관리자 비밀번호가 등록되었습니다.", dialog)
+                box = MessageBox(
+                    "등록 완료", "관리자 비밀번호가 등록되었습니다.", dialog
+                )
                 box.cancelButton.hide()
                 box.yesButton.setText("확인")
                 box.exec()
                 dialog.accept()
             except Exception as e:
-                box = MessageBox("등록 실패", f"서버 등록 중 오류가 발생했습니다.\n{e!s}", dialog)
+                box = MessageBox(
+                    "등록 실패", f"서버 등록 중 오류가 발생했습니다.\n{e!s}", dialog
+                )
                 box.cancelButton.hide()
                 box.yesButton.setText("확인")
                 box.exec()

@@ -3,6 +3,7 @@ soy-server TCP 클라이언트. Worker CRUD + card_read 푸시 수신.
 환경변수: SOY_SERVER_HOST(기본 127.0.0.1), SOY_SERVER_TCP_PORT(기본 9001).
 TCP: 길이 프리픽스 프레임 [4바이트 BE 길이][payload UTF-8 JSON].
 """
+
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ _TIMEOUT = 10.0
 def get_server_address() -> str:
     """soy-pc가 연결하는 서버 주소(host:port). 에러 메시지 등에 사용."""
     return f"{_HOST}:{_PORT}"
+
 
 _socket: socket.socket | None = None
 _socket_lock = threading.Lock()
@@ -167,7 +169,11 @@ def _reader_loop() -> None:
                         ev.set()
             elif msg.get("type") == "card_read":
                 uid = msg.get("uid") or ""
-                logger.info("[RFID] card_read received from server uid=%r callback=%s", uid, _card_read_callback is not None)
+                logger.info(
+                    "[RFID] card_read received from server uid=%r callback=%s",
+                    uid,
+                    _card_read_callback is not None,
+                )
                 if uid and _card_read_callback:
                     try:
                         _card_read_callback(uid)
@@ -224,7 +230,11 @@ def _request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
     with _auth_token_lock:
         tok = _auth_token
     # 인증 불필요 액션에는 auth_token 붙이지 않음
-    if tok and action not in ("admin_login", "first_admin_needs_password", "register_first_admin"):
+    if tok and action not in (
+        "admin_login",
+        "first_admin_needs_password",
+        "register_first_admin",
+    ):
         body["auth_token"] = tok
     req_id = _next_id()
     ev = threading.Event()
@@ -369,7 +379,9 @@ def get_order(order_id: int) -> dict:
 
 def get_order_id_by_order_item_id(order_item_id: int) -> int:
     """order_item_id로 order_id 조회. 없으면 RuntimeError."""
-    ok, body, err = _request("get_order_id_by_order_item_id", {"order_item_id": order_item_id})
+    ok, body, err = _request(
+        "get_order_id_by_order_item_id", {"order_item_id": order_item_id}
+    )
     if not ok:
         raise RuntimeError(err or "주문 상세 조회 실패")
     if body and isinstance(body, dict) and "order_id" in body:
@@ -377,7 +389,9 @@ def get_order_id_by_order_item_id(order_item_id: int) -> int:
     raise RuntimeError("order_id not in response")
 
 
-def order_mark_delivered(*, order_id: int | None = None, order_item_id: int | None = None) -> dict:
+def order_mark_delivered(
+    *, order_id: int | None = None, order_item_id: int | None = None
+) -> dict:
     """주문을 입고 처리(pending → delivered). order_id 또는 order_item_id 중 하나 지정.
     이미 delivered면 RuntimeError(메시지에 '이미 입고한 주문')."""
     body: dict[str, Any] = {}

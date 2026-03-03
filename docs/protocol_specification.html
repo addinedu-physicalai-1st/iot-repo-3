@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>protocol_specification.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="soyfactory-%ED%94%84%EB%A1%9C%ED%86%A0%EC%BD%9C-%EB%AA%85%EC%84%B8%EC%84%9C">SoyFactory 프로토콜 명세서</h1>
+<blockquote>
+<p><strong>문서 기준</strong>: 현재 구현된 코드 (<code>main</code> 브랜치) 기준<br>
+<strong>최종 갱신</strong>: 2026-03-03</p>
+</blockquote>
+<hr>
+<h2 id="1-%EC%8B%9C%EC%8A%A4%ED%85%9C-%EA%B5%AC%EC%84%B1-%EC%9A%94%EC%86%8C">1. 시스템 구성 요소</h2>
+<table>
+<thead>
+<tr>
+<th>컴포넌트</th>
+<th>역할</th>
+<th>네트워크</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ESP32-DevKit</strong></td>
+<td>컨베이어 FSM (DC모터·서보·LED·센서)</td>
+<td>WiFi STA</td>
+</tr>
+<tr>
+<td><strong>ESP32-CAM</strong></td>
+<td>JPEG 카메라 스트리밍</td>
+<td>WiFi STA</td>
+</tr>
+<tr>
+<td><strong>soy-pc</strong></td>
+<td>PyQt GUI + IoT 제어 허브</td>
+<td>호스트 네트워크</td>
+</tr>
+<tr>
+<td><strong>MQTT Broker</strong></td>
+<td>Mosquitto (호스트 PC 직접 실행)</td>
+<td><code>192.168.0.152:1883</code></td>
+</tr>
+<tr>
+<td><strong>soy-server</strong></td>
+<td>FastAPI (Docker) — 비즈니스 로직</td>
+<td><code>:8000</code> (HTTP), <code>:9001</code> (TCP)</td>
+</tr>
+<tr>
+<td><strong>MySQL</strong></td>
+<td>soydb (Docker)</td>
+<td><code>:3333</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="2-mqtt-%ED%94%84%EB%A1%9C%ED%86%A0%EC%BD%9C-%ED%8F%AC%ED%8A%B8-1883">2. MQTT 프로토콜 (포트 1883)</h2>
+<h3 id="21-%EC%97%B0%EA%B2%B0-%EC%A0%95%EB%B3%B4">2.1 연결 정보</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>브로커</td>
+<td><code>192.168.0.152:1883</code> (Mosquitto)</td>
+</tr>
+<tr>
+<td>QoS</td>
+<td>0 (At Most Once)</td>
+</tr>
+<tr>
+<td>Clean Session</td>
+<td>true</td>
+</tr>
+<tr>
+<td>Client ID</td>
+<td><code>SoyDevKit-{random_hex}</code> / <code>SoyCam-{random_hex}</code> / <code>soy-pc</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-%ED%86%A0%ED%94%BD--%EB%A9%94%EC%8B%9C%EC%A7%80-%EC%A0%95%EC%9D%98">2.2 토픽 &amp; 메시지 정의</h3>
+<h4 id="%ED%86%A0%ED%94%BD-devicecontrol-soy-pc-%E2%86%92-esp32">토픽: <code>device/control</code> (soy-pc → ESP32)</h4>
+<table>
+<thead>
+<tr>
+<th>메시지</th>
+<th>포맷</th>
+<th>설명</th>
+<th>처리 주체</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DC_START</code></td>
+<td>문자열</td>
+<td>DC 모터 시작 (기본 속도)</td>
+<td>DevKit + CAM</td>
+</tr>
+<tr>
+<td><code>DC_START:&lt;speed&gt;</code></td>
+<td><code>DC_START:200</code></td>
+<td>DC 모터 시작 (속도 0–255)</td>
+<td>DevKit + CAM</td>
+</tr>
+<tr>
+<td><code>DC_STOP</code></td>
+<td>문자열</td>
+<td>DC 모터 정지</td>
+<td>DevKit + CAM</td>
+</tr>
+<tr>
+<td><code>SORT_DIR:1L</code></td>
+<td>문자열</td>
+<td>분류 방향 = 1L 라인</td>
+<td>DevKit만</td>
+</tr>
+<tr>
+<td><code>SORT_DIR:2L</code></td>
+<td>문자열</td>
+<td>분류 방향 = 2L 라인</td>
+<td>DevKit만</td>
+</tr>
+<tr>
+<td><code>SORT_DIR:WARN</code></td>
+<td>문자열</td>
+<td>미등록 QR 경고</td>
+<td>DevKit만</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>발행 시점 (soy-pc):</strong></p>
+<ul>
+<li><code>DC_START:{speed}</code> — 작업자가 &quot;공정 시작&quot; 버튼 클릭 시</li>
+<li><code>DC_STOP</code> — 작업자가 &quot;공정 중지&quot; 버튼 클릭 시, 또는 공정 자동 완료 시</li>
+<li><code>SORT_DIR:1L</code> / <code>SORT_DIR:2L</code> — ESP32-CAM UDP 스트림에서 QR 인식 성공, item_code 접미사가 <code>_1l</code> / <code>_2l</code>일 때</li>
+<li><code>SORT_DIR:WARN</code> — QR 인식 실패, item_code 없음, 미등록 품목, 용량 판별 불가 시</li>
+</ul>
+</blockquote>
+<h4 id="%ED%86%A0%ED%94%BD-devicesensor-esp32-devkit-%E2%86%92-soy-pc">토픽: <code>device/sensor</code> (ESP32-DevKit → soy-pc)</h4>
+<table>
+<thead>
+<tr>
+<th>메시지</th>
+<th>포맷</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PROXIMITY:1</code></td>
+<td>문자열</td>
+<td>근접 센서 감지 (상태 변경 시만 발행)</td>
+</tr>
+<tr>
+<td><code>PROXIMITY:0</code></td>
+<td>문자열</td>
+<td>근접 센서 미감지 (상태 변경 시만 발행)</td>
+</tr>
+<tr>
+<td><code>DETECTED</code></td>
+<td>문자열</td>
+<td>물체 감지 → SORTING 진입 시</td>
+</tr>
+<tr>
+<td><code>SORTED_1L</code></td>
+<td>문자열</td>
+<td>1L 분류 완료</td>
+</tr>
+<tr>
+<td><code>SORTED_2L</code></td>
+<td>문자열</td>
+<td>2L 분류 완료</td>
+</tr>
+<tr>
+<td><code>SORTED_UNCLASSIFIED</code></td>
+<td>문자열</td>
+<td>미분류 완료 (sort_dir=NONE일 때)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>soy-pc 수신 처리:</strong></p>
+<ul>
+<li><code>PROXIMITY:*</code> → GUI 근접센서 상태 표시 갱신</li>
+<li><code>SORTED_1L</code> → DB <code>process.success_1l_qty += 1</code> 업데이트 (TCP → soy-server)</li>
+<li><code>SORTED_2L</code> → DB <code>process.success_2l_qty += 1</code> 업데이트</li>
+<li><code>SORTED_UNCLASSIFIED</code> → DB <code>process.unclassified_qty += 1</code> 업데이트</li>
+<li>분류 합계가 주문 수량에 도달하면 자동으로 <code>DC_STOP</code> 발행 + 공정 종료</li>
+</ul>
+</blockquote>
+<h4 id="%ED%86%A0%ED%94%BD-devicestatus-esp32-devkit-%E2%86%92-soy-pc">토픽: <code>device/status</code> (ESP32-DevKit → soy-pc)</h4>
+<table>
+<thead>
+<tr>
+<th>메시지</th>
+<th>포맷</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{&quot;state&quot;:&quot;IDLE&quot;}</code></td>
+<td>JSON</td>
+<td>대기 상태</td>
+</tr>
+<tr>
+<td><code>{&quot;state&quot;:&quot;RUNNING&quot;}</code></td>
+<td>JSON</td>
+<td>공정 진행 중</td>
+</tr>
+<tr>
+<td><code>{&quot;state&quot;:&quot;SORTING&quot;}</code></td>
+<td>JSON</td>
+<td>분류 동작 중</td>
+</tr>
+<tr>
+<td><code>{&quot;state&quot;:&quot;WARNING&quot;}</code></td>
+<td>JSON</td>
+<td>미등록 QR 경고 중</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>soy-pc 수신 처리:</strong></p>
+<ul>
+<li>FSM 상태 표시 UI 업데이트 (컬러 배지)</li>
+<li>Watchdog: ESP32가 <code>IDLE</code>인데 soy-pc에서 공정이 진행 중이면 <code>DC_START</code> 재전송</li>
+</ul>
+</blockquote>
+<h3 id="23-%EA%B5%AC%EB%8F%85%EB%B0%9C%ED%96%89-%EB%A7%B5">2.3 구독/발행 맵</h3>
+<pre class="hljs"><code><div>┌──────────────────────────────────────────────────────┐
+│ soy-pc (paho-mqtt, Client ID: &quot;soy-pc&quot;)              │
+│   Pub  → device/control                              │
+│   Sub  ← device/sensor                               │
+│   Sub  ← device/status                               │
+├──────────────────────────────────────────────────────┤
+│ ESP32-DevKit (PubSubClient, ID: &quot;SoyDevKit-xxxx&quot;)    │
+│   Sub  ← device/control                              │
+│   Pub  → device/sensor                               │
+│   Pub  → device/status                               │
+├──────────────────────────────────────────────────────┤
+│ ESP32-CAM (PubSubClient, ID: &quot;SoyCam-xxxx&quot;)          │
+│   Sub  ← device/control  (DC_START/DC_STOP만 처리)   │
+└──────────────────────────────────────────────────────┘
+</div></code></pre>
+<hr>
+<h2 id="3-udp-%ED%94%84%EB%A1%9C%ED%86%A0%EC%BD%9C-%ED%8F%AC%ED%8A%B8-8021">3. UDP 프로토콜 (포트 8021)</h2>
+<h3 id="31-%EC%97%B0%EA%B2%B0-%EC%A0%95%EB%B3%B4">3.1 연결 정보</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>방향</td>
+<td>ESP32-CAM → soy-pc (단방향)</td>
+</tr>
+<tr>
+<td>포트</td>
+<td>8021</td>
+</tr>
+<tr>
+<td>전송 조건</td>
+<td>MQTT <code>DC_START</code> 수신 후 시작</td>
+</tr>
+<tr>
+<td>정지 조건</td>
+<td>MQTT <code>DC_STOP</code> 수신 시 정지</td>
+</tr>
+<tr>
+<td>프레임 레이트</td>
+<td>~5 FPS (200ms 인터벌)</td>
+</tr>
+<tr>
+<td>JPEG 해상도</td>
+<td>QVGA (320×240)</td>
+</tr>
+<tr>
+<td>JPEG 품질</td>
+<td>12 (0–63, 낮을수록 고품질)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-img-%ED%8C%A8%ED%82%B7-%ED%8F%AC%EB%A7%B7">3.2 IMG 패킷 포맷</h3>
+<p>하나의 JPEG 프레임을 최대 1024바이트 청크로 분할하여 전송한다.</p>
+<pre class="hljs"><code><div>┌───────────────────────────────────────────────┐
+│ Offset │ Size │ Type    │ Field               │
+├────────┼──────┼─────────┼─────────────────────┤
+│  0–2   │  3B  │ ASCII   │ &quot;IMG&quot; (매직 바이트)  │
+│  3     │  1B  │ char    │ frame_type ('S')     │
+│  4–5   │  2B  │ u16 LE  │ image_id (0~65535)   │
+│  6–7   │  2B  │ u16 LE  │ total_chunks         │
+│  8–9   │  2B  │ u16 LE  │ chunk_index (0-based)│
+│ 10+    │ ≤1024│ bytes   │ JPEG payload         │
+└───────────────────────────────────────────────┘
+</div></code></pre>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&quot;IMG&quot;</code></td>
+<td>3바이트 매직. 이 값이 아니면 패킷 폐기</td>
+</tr>
+<tr>
+<td><code>frame_type</code></td>
+<td><code>'S'</code> = Standard. 향후 확장용</td>
+</tr>
+<tr>
+<td><code>image_id</code></td>
+<td>프레임 고유 ID. 0→65535 순환 (wrapping)</td>
+</tr>
+<tr>
+<td><code>total_chunks</code></td>
+<td>이 프레임의 전체 청크 수</td>
+</tr>
+<tr>
+<td><code>chunk_index</code></td>
+<td>현재 청크 인덱스 (0부터)</td>
+</tr>
+<tr>
+<td>JPEG payload</td>
+<td>최대 1024바이트의 JPEG 바이너리 조각</td>
+</tr>
+</tbody>
+</table>
+<h3 id="33-%EC%88%98%EC%8B%A0-%EC%B8%A1-%EC%9E%AC%EC%A1%B0%EB%A6%BD-%EB%A1%9C%EC%A7%81-soy-pc">3.3 수신 측 재조립 로직 (soy-pc)</h3>
+<pre class="hljs"><code><div><span class="hljs-comment"># 1. 패킷 검증: len &gt;= 10 and data[:3] == b"IMG"</span>
+<span class="hljs-comment"># 2. 헤더 파싱: struct.unpack_from("&lt;H", data, 4/6/8)</span>
+<span class="hljs-comment"># 3. 버퍼에 저장: buffers[image_id]["chunks"][chunk_index] = data[10:]</span>
+<span class="hljs-comment"># 4. 모든 청크 수신 완료 시:</span>
+<span class="hljs-comment">#    jpeg_data = b"".join(chunks[0], chunks[1], ..., chunks[N-1])</span>
+<span class="hljs-comment"># 5. cv2.imdecode(jpeg_data) → QImage → GUI 표시</span>
+<span class="hljs-comment"># 6. pyzbar.decode(frame) → QR 코드 인식</span>
+<span class="hljs-comment"># 7. 이전 이미지 버퍼는 최대 2개 유지 (메모리 관리)</span>
+</div></code></pre>
+<h3 id="34-%EC%A0%84%EC%86%A1-%EC%8B%A4%ED%8C%A8-%EC%B2%98%EB%A6%AC">3.4 전송 실패 처리</h3>
+<ul>
+<li>청크 전송 실패 (ESP32 <code>endPacket() == false</code>): 30ms 대기 후 다음 청크로 진행</li>
+<li>전송 성공: 15ms 인터-청크 딜레이</li>
+<li>soy-pc 측에서 불완전 프레임은 자동 폐기 (전체 청크 미수신)</li>
+</ul>
+<hr>
+<h2 id="4-tcp-%ED%94%84%EB%A1%9C%ED%86%A0%EC%BD%9C-%ED%8F%AC%ED%8A%B8-9001">4. TCP 프로토콜 (포트 9001)</h2>
+<h3 id="41-%EC%97%B0%EA%B2%B0-%EC%A0%95%EB%B3%B4">4.1 연결 정보</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>방향</td>
+<td>soy-pc ↔ soy-server (양방향)</td>
+</tr>
+<tr>
+<td>포트</td>
+<td>9001</td>
+</tr>
+<tr>
+<td>프레임</td>
+<td>길이 프리픽스 방식</td>
+</tr>
+<tr>
+<td>인코딩</td>
+<td>UTF-8 JSON</td>
+</tr>
+<tr>
+<td>최대 페이로드</td>
+<td>1MB (1,048,576 bytes)</td>
+</tr>
+<tr>
+<td>타임아웃</td>
+<td>10초 (soy-pc 측)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-%ED%94%84%EB%A0%88%EC%9E%84-%ED%8F%AC%EB%A7%B7">4.2 프레임 포맷</h3>
+<pre class="hljs"><code><div>┌─────────────────────────────────────────┐
+│ Offset │ Size  │ Type       │ Field     │
+├────────┼───────┼────────────┼───────────┤
+│  0–3   │  4B   │ u32 BE     │ payload   │
+│        │       │            │ 길이(byte)│
+│  4+    │ N     │ UTF-8 JSON │ payload   │
+└─────────────────────────────────────────┘
+</div></code></pre>
+<h3 id="43-%EC%9A%94%EC%B2%AD-%EB%A9%94%EC%8B%9C%EC%A7%80-soy-pc-%E2%86%92-soy-server">4.3 요청 메시지 (soy-pc → soy-server)</h3>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"type"</span>: <span class="hljs-string">"request"</span>,
+  <span class="hljs-attr">"id"</span>: <span class="hljs-number">1</span>,
+  <span class="hljs-attr">"action"</span>: <span class="hljs-string">"list_orders"</span>,
+  <span class="hljs-attr">"body"</span>: { ... }
+}
+</div></code></pre>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td>string</td>
+<td>항상 <code>&quot;request&quot;</code></td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>int</td>
+<td>요청 고유 ID (자동 증가, 응답 매칭용)</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>string</td>
+<td>액션 이름 (아래 액션 목록 참조)</td>
+</tr>
+<tr>
+<td><code>body</code></td>
+<td>object</td>
+<td>액션별 파라미터</td>
+</tr>
+</tbody>
+</table>
+<h3 id="44-%EC%9D%91%EB%8B%B5-%EB%A9%94%EC%8B%9C%EC%A7%80-soy-server-%E2%86%92-soy-pc">4.4 응답 메시지 (soy-server → soy-pc)</h3>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"type"</span>: <span class="hljs-string">"response"</span>,
+  <span class="hljs-attr">"id"</span>: <span class="hljs-number">1</span>,
+  <span class="hljs-attr">"ok"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"body"</span>: { ... },
+  <span class="hljs-attr">"error"</span>: <span class="hljs-literal">null</span>
+}
+</div></code></pre>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td>string</td>
+<td>항상 <code>&quot;response&quot;</code></td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>int</td>
+<td>요청 <code>id</code>와 동일 (매칭용)</td>
+</tr>
+<tr>
+<td><code>ok</code></td>
+<td>bool</td>
+<td>성공 여부</td>
+</tr>
+<tr>
+<td><code>body</code></td>
+<td>any</td>
+<td>성공 시 응답 데이터, 실패 시 <code>null</code></td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>string|null</td>
+<td>실패 시 에러 메시지, 성공 시 <code>null</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="45-%EC%84%9C%EB%B2%84-%ED%91%B8%EC%8B%9C-%EB%A9%94%EC%8B%9C%EC%A7%80-soy-server-%E2%86%92-soy-pc-%EB%B9%84%EB%8F%99%EA%B8%B0">4.5 서버 푸시 메시지 (soy-server → soy-pc, 비동기)</h3>
+<h4 id="cardread-rfid-%EC%B9%B4%EB%93%9C-%EC%9D%B8%EC%8B%9D">card_read (RFID 카드 인식)</h4>
+<p>시리얼 포트에서 RFID 카드 인식 시, 연결된 모든 soy-pc 클라이언트에 브로드캐스트.</p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"type"</span>: <span class="hljs-string">"card_read"</span>,
+  <span class="hljs-attr">"uid"</span>: <span class="hljs-string">"A1B2C3D4"</span>
+}
+</div></code></pre>
+<h2 id="46-%EC%95%A1%EC%85%98-%EB%AA%A9%EB%A1%9D">4.6 액션 목록</h2>
+<h3 id="%EC%9D%B8%EC%A6%9D-%EB%B6%88%ED%95%84%EC%9A%94-%EC%95%A1%EC%85%98">인증 불필요 액션</h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Body</th>
+<th>Success Body</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>admin_count</code></td>
+<td>–</td>
+<td><code>{count}</code></td>
+<td>관리자 수</td>
+</tr>
+<tr>
+<td><code>first_admin_needs_password</code></td>
+<td>–</td>
+<td><code>{needs_password}</code></td>
+<td>최초 비밀번호 필요 여부</td>
+</tr>
+<tr>
+<td><code>register_first_admin</code></td>
+<td><code>password</code></td>
+<td><code>null</code></td>
+<td>최초 관리자 등록</td>
+</tr>
+<tr>
+<td><code>admin_login</code></td>
+<td><code>password</code></td>
+<td><code>{token, admin_id}</code></td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>admin_logout</code></td>
+<td><code>auth_token</code></td>
+<td><code>null</code></td>
+<td>로그아웃</td>
+</tr>
+<tr>
+<td><code>list_orders</code></td>
+<td>–</td>
+<td><code>[order]</code></td>
+<td>주문 목록</td>
+</tr>
+<tr>
+<td><code>get_order</code></td>
+<td><code>order_id</code></td>
+<td><code>{order}</code></td>
+<td>주문 상세</td>
+</tr>
+<tr>
+<td><code>get_order_id_by_order_item_id</code></td>
+<td><code>order_item_id</code></td>
+<td><code>{order_id}</code></td>
+<td>품목 → 주문</td>
+</tr>
+<tr>
+<td><code>order_mark_delivered</code></td>
+<td><code>order_id</code> | <code>order_item_id</code></td>
+<td><code>{order_id, process_id}</code></td>
+<td>입고 처리</td>
+</tr>
+<tr>
+<td><code>list_processes</code></td>
+<td>–</td>
+<td><code>[process]</code></td>
+<td>공정 목록</td>
+</tr>
+<tr>
+<td><code>process_start</code></td>
+<td><code>process_id</code></td>
+<td><code>{process}</code></td>
+<td>공정 시작</td>
+</tr>
+<tr>
+<td><code>process_stop</code></td>
+<td><code>process_id</code></td>
+<td><code>{process}</code></td>
+<td>공정 종료</td>
+</tr>
+<tr>
+<td><code>process_update</code></td>
+<td><code>process_id, success_1l_qty?, success_2l_qty?, unclassified_qty?</code></td>
+<td><code>{process}</code></td>
+<td>수량 갱신</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="%EA%B4%80%EB%A6%AC%EC%9E%90-%EB%A1%9C%EA%B7%B8%EC%9D%B8-%ED%95%84%EC%88%98-%EC%95%A1%EC%85%98">관리자 로그인 필수 액션</h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Body</th>
+<th>Success Body</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get_first_admin_id</code></td>
+<td><code>auth_token</code></td>
+<td><code>{admin_id}</code></td>
+<td>최초 관리자 ID</td>
+</tr>
+<tr>
+<td><code>list_workers</code></td>
+<td><code>auth_token</code></td>
+<td><code>[worker]</code></td>
+<td>작업자 목록</td>
+</tr>
+<tr>
+<td><code>create_worker</code></td>
+<td><code>auth_token, admin_id, name, card_uid</code></td>
+<td><code>{worker}</code></td>
+<td>작업자 등록</td>
+</tr>
+<tr>
+<td><code>update_worker</code></td>
+<td><code>auth_token, worker_id, name?, card_uid?</code></td>
+<td><code>{worker}</code></td>
+<td>작업자 수정</td>
+</tr>
+<tr>
+<td><code>delete_worker</code></td>
+<td><code>auth_token, worker_id</code></td>
+<td><code>null</code></td>
+<td>작업자 삭제</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="5-%EC%A0%84%EC%B2%B4-%EC%9B%8C%ED%81%AC%ED%94%8C%EB%A1%9C%EC%9A%B0-%EC%8B%9C%ED%80%80%EC%8A%A4">5. 전체 워크플로우 시퀀스</h2>
+<h3 id="51-%EB%B6%84%EB%A5%98-%EA%B3%B5%EC%A0%95-%EC%A0%84%EC%B2%B4-%ED%9D%90%EB%A6%84">5.1 분류 공정 전체 흐름</h3>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant W as 작업자 (soy-pc GUI)
+    participant PC as soy-pc
+    participant SVR as soy-server
+    participant MQTT as MQTT Broker
+    participant DEV as ESP32-DevKit
+    participant CAM as ESP32-CAM
+
+    Note over W,CAM: ① 공정 시작
+    W->>PC: "공정 시작" 버튼 클릭
+    PC->>SVR: TCP {"action":"process_start","body":{"process_id":1}}
+    SVR-->>PC: TCP {"ok":true,"body":{process}}
+    PC->>MQTT: Pub device/control "DC_START:200"
+    MQTT->>DEV: Sub → DC_START:200
+    MQTT->>CAM: Sub → DC_START:200
+    DEV->>MQTT: Pub device/status {"state":"RUNNING"}
+    MQTT-->>PC: Sub ← RUNNING
+
+    Note over CAM,PC: ② 카메라 스트리밍 + QR 인식
+    loop ~5 FPS
+        CAM-->>PC: UDP :8021 IMG 청크 패킷
+    end
+    PC->>PC: JPEG 재조립 → pyzbar QR 디코딩
+    PC->>MQTT: Pub device/control "SORT_DIR:1L"
+    MQTT->>DEV: Sub → SORT_DIR:1L
+
+    Note over DEV: ③ 물체 감지 → 분류
+    DEV->>MQTT: Pub device/sensor "PROXIMITY:1"
+    DEV->>MQTT: Pub device/sensor "DETECTED"
+    DEV->>MQTT: Pub device/status {"state":"SORTING"}
+    Note over DEV: 서보 45° → 1500ms 유지 → 90° 복귀 → 600ms 대기
+    DEV->>MQTT: Pub device/sensor "SORTED_1L"
+    DEV->>MQTT: Pub device/status {"state":"RUNNING"}
+
+    Note over PC,SVR: ④ 분류 결과 DB 저장
+    MQTT-->>PC: Sub ← "SORTED_1L"
+    PC->>SVR: TCP {"action":"process_update","body":{"process_id":1,"success_1l_qty":1}}
+    SVR-->>PC: TCP {"ok":true}
+
+    Note over W,CAM: ⑤ 목표 수량 도달 → 자동 종료
+    PC->>PC: sorted_total >= order_total?
+    PC->>MQTT: Pub device/control "DC_STOP"
+    PC->>SVR: TCP {"action":"process_stop","body":{"process_id":1}}
+</div></code></pre>
+<h3 id="52-%EB%AF%B8%EB%93%B1%EB%A1%9D-qr-%EA%B2%BD%EA%B3%A0-%ED%9D%90%EB%A6%84">5.2 미등록 QR 경고 흐름</h3>
+<pre><code class="language-mermaid"><div class="mermaid">sequenceDiagram
+    participant PC as soy-pc
+    participant MQTT as MQTT Broker
+    participant DEV as ESP32-DevKit
+
+    Note over PC: QR 인식 → 미등록 품목
+    PC->>MQTT: Pub device/control "SORT_DIR:WARN"
+    MQTT->>DEV: Sub → SORT_DIR:WARN
+    Note over DEV: FSM: RUNNING → WARNING
+    DEV->>MQTT: Pub device/status {"state":"WARNING"}
+    Note over DEV: LED 노랑 깜빡임 (250ms 주기)
+    Note over DEV: 3초 후 자동 복귀
+    DEV->>MQTT: Pub device/status {"state":"RUNNING"}
+</div></code></pre>
+<hr>
+<h2 id="6-%ED%8F%AC%ED%8A%B8-%EC%9A%94%EC%95%BD">6. 포트 요약</h2>
+<table>
+<thead>
+<tr>
+<th>포트</th>
+<th>프로토콜</th>
+<th>컴포넌트</th>
+<th>방향</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1883</strong></td>
+<td>MQTT</td>
+<td>Mosquitto (호스트)</td>
+<td>양방향</td>
+<td>IoT 제어·상태·센서</td>
+</tr>
+<tr>
+<td><strong>8021</strong></td>
+<td>UDP</td>
+<td>ESP32-CAM → soy-pc</td>
+<td>단방향</td>
+<td>JPEG 청크 스트리밍</td>
+</tr>
+<tr>
+<td><strong>9001</strong></td>
+<td>TCP</td>
+<td>soy-pc ↔ soy-server</td>
+<td>양방향</td>
+<td>Worker CRUD, 공정 관리, card_read</td>
+</tr>
+<tr>
+<td><strong>8000</strong></td>
+<td>HTTP</td>
+<td>soy-server (Docker)</td>
+<td>양방향</td>
+<td>Health check, API docs</td>
+</tr>
+<tr>
+<td><strong>3333</strong></td>
+<td>MySQL</td>
+<td>MySQL (Docker)</td>
+<td>양방향</td>
+<td>DB 접근 (내부용)</td>
+</tr>
+<tr>
+<td><strong>8080</strong></td>
+<td>HTTP</td>
+<td>Adminer (Docker)</td>
+<td>양방향</td>
+<td>DB 관리 웹 UI</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="7-%ED%99%98%EA%B2%BD-%EB%B3%80%EC%88%98-env">7. 환경 변수 (.env)</h2>
+<h3 id="soy-controllerenv-esp32-%EB%B9%8C%EB%93%9C-%EC%8B%9C-%EC%A3%BC%EC%9E%85">soy-controller/.env (ESP32 빌드 시 주입)</h3>
+<table>
+<thead>
+<tr>
+<th>변수</th>
+<th>예시 값</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WIFI_SSID</code></td>
+<td><code>addinedu_201class_4-2.4G</code></td>
+<td>WiFi SSID</td>
+</tr>
+<tr>
+<td><code>WIFI_PASS</code></td>
+<td><code>201class4!</code></td>
+<td>WiFi 비밀번호</td>
+</tr>
+<tr>
+<td><code>MQTT_BROKER</code></td>
+<td><code>192.168.0.152</code></td>
+<td>MQTT 브로커 IP</td>
+</tr>
+<tr>
+<td><code>UDP_IP</code></td>
+<td><code>192.168.0.152</code></td>
+<td>UDP 스트리밍 대상 IP</td>
+</tr>
+</tbody>
+</table>
+<h3 id="soy-pc-%ED%99%98%EA%B2%BD-%EB%B3%80%EC%88%98">soy-pc 환경 변수</h3>
+<table>
+<thead>
+<tr>
+<th>변수</th>
+<th>기본값</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MQTT_BROKER_HOST</code></td>
+<td><code>127.0.0.1</code></td>
+<td>MQTT 브로커 호스트</td>
+</tr>
+<tr>
+<td><code>MQTT_BROKER_PORT</code></td>
+<td><code>1883</code></td>
+<td>MQTT 브로커 포트</td>
+</tr>
+<tr>
+<td><code>SOY_SERVER_HOST</code></td>
+<td><code>127.0.0.1</code></td>
+<td>soy-server TCP 호스트</td>
+</tr>
+<tr>
+<td><code>SOY_SERVER_TCP_PORT</code></td>
+<td><code>9001</code></td>
+<td>soy-server TCP 포트</td>
+</tr>
+</tbody>
+</table>
+<h3 id="docker-compose-%ED%99%98%EA%B2%BD-%EB%B3%80%EC%88%98">docker-compose 환경 변수</h3>
+<table>
+<thead>
+<tr>
+<th>변수</th>
+<th>기본값</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SERIAL_DEVICE</code></td>
+<td>(미설정)</td>
+<td>RFID 시리얼 장치 (<code>/dev/ttyUSB0</code>)</td>
+</tr>
+<tr>
+<td><code>MYSQL_*</code></td>
+<td><code>soy/soy/soydb</code></td>
+<td>DB 접속 정보</td>
+</tr>
+<tr>
+<td><code>SOY_PC_TCP_PORT</code></td>
+<td><code>9001</code></td>
+<td>TCP 브릿지 포트</td>
+</tr>
+</tbody>
+</table>
+
+</body>
+</html>

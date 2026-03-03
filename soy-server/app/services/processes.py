@@ -2,6 +2,7 @@
 공정(processes) 조회·시작·중지.
 한 번에 하나의 공정만 RUNNING. 시작 시 기존 RUNNING은 PAUSED로 전환.
 """
+
 import logging
 from datetime import datetime
 from typing import Any
@@ -84,7 +85,10 @@ def start_process(process_id: int, engine: Engine | None = None) -> dict[str, An
         if running and running.process_id != process_id:
             running.status = PAUSED
             running.end_time = now
-            logger.info("process_id=%s auto-paused (another process starting)", running.process_id)
+            logger.info(
+                "process_id=%s auto-paused (another process starting)",
+                running.process_id,
+            )
         process.start_time = process.start_time or now
         process.status = RUNNING
         process.end_time = None
@@ -93,7 +97,9 @@ def start_process(process_id: int, engine: Engine | None = None) -> dict[str, An
         return {
             "process_id": process.process_id,
             "order_id": process.order_id,
-            "start_time": process.start_time.isoformat() if process.start_time else None,
+            "start_time": (
+                process.start_time.isoformat() if process.start_time else None
+            ),
             "status": process.status,
         }
 
@@ -143,7 +149,9 @@ def update_process(
         if order:
             order_total = sum(oi.expected_qty or 0 for oi in order.order_items)
             classified_total = (
-                process.success_1l_qty + process.success_2l_qty + process.unclassified_qty
+                process.success_1l_qty
+                + process.success_2l_qty
+                + process.unclassified_qty
             )
             if classified_total > order_total:
                 raise ProcessQtyExceedsOrderTotal(

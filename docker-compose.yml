@@ -40,8 +40,8 @@ services:
       MYSQL_USER: soy
       MYSQL_PASSWORD: soy
       MYSQL_DATABASE: soydb
-      # 시리얼: SOY_REGISTER_SERIAL_PORT 직접 지정 가능(socket://host.docker.internal:2000 등). 없으면 SERIAL_DEVICE 있을 때 /dev/ttyUSB0
-      SOY_REGISTER_SERIAL_PORT: ${SOY_REGISTER_SERIAL_PORT:-${SERIAL_DEVICE:+/dev/ttyUSB0}}
+      # SERIAL_DEVICE 설정 시 /dev/ttyUSB0(컨테이너 내), 미설정 시 빈 값으로 시리얼 비활성
+      SOY_REGISTER_SERIAL_PORT: ${SERIAL_DEVICE:+/dev/ttyUSB0}
     devices:
       - ${SERIAL_DEVICE:-/dev/null}:/dev/ttyUSB0
     depends_on:
@@ -63,6 +63,7 @@ services:
       mysql:
         condition: service_healthy
     restart: unless-stopped
+
 
 volumes:
   mysql_data:
