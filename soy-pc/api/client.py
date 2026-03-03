@@ -317,6 +317,21 @@ def list_workers() -> list[dict]:
     return body if isinstance(body, list) else []
 
 
+def list_access_logs(
+    limit: int = 500, worker_name: str | None = None
+) -> list[dict]:
+    """출입 로그 목록 (최신순). worker_name이 있으면 작업자 이름으로 필터. 관리자 로그인 필요."""
+    req_body: dict = {"limit": limit}
+    if worker_name is not None and str(worker_name).strip():
+        req_body["worker_name"] = str(worker_name).strip()
+    ok, res, err = _request("list_access_logs", req_body)
+    if not ok:
+        raise RuntimeError(err or "list_access_logs failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
 def create_worker(admin_id: int, name: str, card_uid: str) -> dict:
     """작업자 등록. card_uid 중복 시 WorkerCreateConflict."""
     ok, body, err = _request(

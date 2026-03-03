@@ -335,32 +335,39 @@ QWidget#WorkerScreen QTableWidget QLineEdit {{
   selection-color: {TEXT_PRIMARY};
 }}
 
-/* ========== 관리자 화면 (사이드바 + 콘텐츠) ========== */
+/* ========== 관리자 화면 (사이드바 + 콘텐츠) — 작업자 화면 사이드바와 동일 스타일 ========== */
 QWidget#AdminScreen {{
   background-color: {BG_MAIN};
 }}
 /* 사이드바 */
 QWidget#AdminScreen QFrame#admin_sidebar {{
-  background-color: {BG_CARD};
+  background-color: transparent;
   border-right: 1px solid {BORDER};
 }}
 QWidget#AdminScreen QFrame#admin_sidebar QLabel#label_menuTitle {{
-  color: {TEXT_SECONDARY};
-  font-size: 11px;
+  color: {TEXT_PRIMARY};
+  font-size: 20px;
   font-weight: bold;
+  padding: 12px 0 8px 0;
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management {{
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log {{
   background-color: transparent;
   color: {TEXT_PRIMARY};
   border: none;
   border-radius: 6px;
   text-align: left;
-  padding: 8px 12px;
+  padding: 10px 12px;
+  font-size: 16px;
+  margin-top: 4px;
+  margin-bottom: 4px;
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:hover {{
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:hover {{
   background-color: {BG_BUTTON};
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:checked {{
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:checked {{
   background-color: {ACCENT_SOFT};
   color: {ACCENT_HOVER};
   font-weight: 600;
@@ -370,6 +377,8 @@ QWidget#AdminScreen QFrame#admin_sidebar QPushButton#backButton {{
   color: {TEXT_PRIMARY};
   border: 1px solid {BORDER};
   border-radius: 6px;
+  font-size: 15px;
+  margin-top: 8px;
 }}
 QWidget#AdminScreen QFrame#admin_sidebar QPushButton#backButton:hover {{
   background-color: {BORDER};

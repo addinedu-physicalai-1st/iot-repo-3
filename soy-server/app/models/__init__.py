@@ -48,6 +48,19 @@ class Worker(Base):
     )
 
 
+class AccessLog(Base):
+    __tablename__ = "access_logs"
+
+    access_log_id: Mapped[int] = mapped_column(
+        "access_log_id", Integer, primary_key=True, autoincrement=True
+    )
+    worker_id: Mapped[int] = mapped_column(
+        "worker_id", Integer, ForeignKey("workers.worker_id", ondelete="RESTRICT"), nullable=False
+    )
+    checked_at: Mapped[datetime] = mapped_column("checked_at", DateTime, nullable=False)
+    direction: Mapped[str] = mapped_column("direction", String(10), nullable=False)
+
+
 class Order(Base):
     __tablename__ = "orders"
 

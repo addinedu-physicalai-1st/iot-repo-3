@@ -14,6 +14,7 @@ from api import (
     create_worker as api_create_worker,
     delete_worker as api_delete_worker,
     get_first_admin_id,
+    list_access_logs,
     list_workers,
     update_worker as api_update_worker,
 )
@@ -121,15 +122,50 @@ def _open_worker_info_dialog(
 
 
 def setup_admin_screen(window, stacked, ui_dir: str) -> None:
-    """관리자 화면: 사이드바, 작업자 관리(목록·추가·정보 팝업에서 수정/삭제)."""
+    """관리자 화면: 사이드바, 작업자 관리(목록·추가·정보 팝업), 출입 로그."""
     admin = window.page_admin
     admin.workerTable.setHorizontalHeaderLabels(["이름", "카드 UID", "등록일자"])
+    admin.accessLogTable.setHorizontalHeaderLabels(
+        ["작업자 이름", "출입 방향", "일시"]
+    )
 
     def _format_created_at(created_at: str) -> str:
         """API created_at (ISO) → 날짜만 표시 (YYYY-MM-DD)."""
         if not created_at:
             return ""
         return created_at[:10] if len(created_at) >= 10 else created_at
+
+    def _format_checked_at(checked_at: str) -> str:
+        """API checked_at (ISO) → 로컬 표시용 (YYYY-MM-DD HH:MM:SS 또는 축약)."""
+        if not checked_at:
+            return ""
+        if len(checked_at) >= 19:
+            return checked_at[:19].replace("T", " ")
+        return checked_at
+
+    def refresh_access_logs():
+        search_text = admin.accessLogSearchEdit.text().strip() if admin.accessLogSearchEdit else ""
+        worker_name_filter = search_text if search_text else None
+        try:
+            logs = list_access_logs(worker_name=worker_name_filter)
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            admin.accessLogTable.setRowCount(0)
+            return
+        admin.accessLogTable.setRowCount(0)
+        for entry in logs:
+            row = admin.accessLogTable.rowCount()
+            admin.accessLogTable.insertRow(row)
+            admin.accessLogTable.setItem(
+                row, 0, QTableWidgetItem(entry.get("worker_name", ""))
+            )
+            direction = (entry.get("direction") or "").strip().lower()
+            direction_label = "입장" if direction == "in" else ("퇴장" if direction == "out" else direction or "—")
+            admin.accessLogTable.setItem(row, 1, QTableWidgetItem(direction_label))
+            admin.accessLogTable.setItem(
+                row,
+                2,
+                QTableWidgetItem(_format_checked_at(entry.get("checked_at", ""))),
+            )
 
     def refresh_workers():
         try:
@@ -168,9 +204,49 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
 
     def on_current_changed(index: int):
         if stacked.widget(index) == admin:
-            refresh_workers()
+            if admin.admin_content_stack.currentWidget() == admin.admin_content_stack.widget(1):
+                refresh_access_logs()
+            else:
+                refresh_workers()
 
     stacked.currentChanged.connect(on_current_changed)
+
+    def on_admin_stack_changed(idx: int):
+        if stacked.currentWidget() != admin:
+            return
+        if idx == 1:
+            refresh_access_logs()
+        else:
+            refresh_workers()
+
+    admin.admin_content_stack.currentChanged.connect(on_admin_stack_changed)
+
+    def show_worker_management():
+        admin.menu_worker_management.setChecked(True)
+        admin.menu_access_log.setChecked(False)
+        admin.admin_content_stack.setCurrentIndex(0)
+        refresh_workers()
+
+    def show_access_log():
+        admin.menu_worker_management.setChecked(False)
+        admin.menu_access_log.setChecked(True)
+        admin.admin_content_stack.setCurrentIndex(1)
+        refresh_access_logs()
+
+    admin.menu_worker_management.clicked.connect(show_worker_management)
+    admin.menu_access_log.clicked.connect(show_access_log)
+    admin.refreshAccessLogButton.clicked.connect(refresh_access_logs)
+
+    def on_access_log_search():
+        refresh_access_logs()
+
+    def on_access_log_clear_filter():
+        admin.accessLogSearchEdit.clear()
+        refresh_access_logs()
+
+    admin.accessLogSearchButton.clicked.connect(on_access_log_search)
+    admin.accessLogClearFilterButton.clicked.connect(on_access_log_clear_filter)
+    admin.accessLogSearchEdit.returnPressed.connect(on_access_log_search)
 
     def back_to_lock():
         admin_logout()
