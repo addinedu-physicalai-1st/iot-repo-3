@@ -21,4 +21,5 @@ dependencies = [
     "opencv-python-headless>=4.8.0",
     "pyzbar>=0.1.9",
     "paho-mqtt>=2.0.0",
+    "opencv-python>=4.13.0.92",
 ]
