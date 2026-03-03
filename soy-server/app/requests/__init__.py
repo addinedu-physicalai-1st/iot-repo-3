@@ -11,6 +11,9 @@ from app.requests import orders as _orders
 from app.requests import processes as _processes
 from app.requests import workers as _workers
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 def handle_no_auth(
     action: str,
@@ -19,7 +22,10 @@ def handle_no_auth(
     session_add: Callable[[str, int], None],
     session_remove: Callable[[str], None],
 ) -> Result | None:
+
     """인증 불필요 액션 처리. 처리한 경우 (ok, body, err) 반환, 아니면 None."""
+    logger.info("인증 불필요 액션 처리. 처리한 경우 (ok, body, err) 반환, 아니면 None.")
+
     result = _auth.handle(action, body, session_add=session_add, session_remove=session_remove)
     if result is not None:
         return result
@@ -29,11 +35,15 @@ def handle_no_auth(
     result = _processes.handle(action, body)
     if result is not None:
         return result
+    result = _workers.handle(action, body)
+    if result is not None:
+        return result
     return None
 
 
 def handle_admin_only(action: str, body: dict[str, Any]) -> Result:
     """admin 인증 후에만 호출. Worker CRUD 등."""
+    logger.info("admin 인증 후에만 호출. Worker CRUD 등.")
     return _workers.handle(action, body)
 
 

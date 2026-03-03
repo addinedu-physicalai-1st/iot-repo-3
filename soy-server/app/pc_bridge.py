@@ -100,6 +100,7 @@ def _broadcast_card_read(line: str) -> None:
 
 def _require_admin(body: dict[str, Any]) -> tuple[bool, str]:
     """auth_token 검사. (유효 여부, 에러 메시지)."""
+    
     token = body.get("auth_token")
     if not token or not isinstance(token, str):
         return (False, "Admin login required")
@@ -122,14 +123,21 @@ def _session_remove(token: str) -> None:
 def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
     """요청 라우팅: 인증 불필요 → 인증 필요(admin) 순으로 처리. 핸들러는 app.requests에서."""
     try:
+        msg = f"요청 라우팅: 인증 불필요 → 인증 필요(admin) 순으로 처리. 핸들러는 app.requests에서."
+        logger.info(msg)
+
         result = handle_no_auth(
             action,
             body,
             session_add=_session_add,
             session_remove=_session_remove,
         )
+
+        logger.info('step-1')
         if result is not None:
             return result
+        
+        logger.info('step-2')
         ok, err = _require_admin(body)
         if not ok:
             return (False, None, err)
@@ -148,8 +156,11 @@ def _handle_request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
 
 def _handle_client(sock: socket.socket) -> None:
     """한 클라이언트의 요청 루프. 길이 프리픽스 프레임으로 수신/송신."""
+    logger.info("한 클라이언트의 요청 루프. 길이 프리픽스 프레임으로 수신/송신.")
+
     try:
         while not _stop.is_set():
+            
             payload = _read_frame(sock)
             if payload is None:
                 break
@@ -162,6 +173,7 @@ def _handle_client(sock: socket.socket) -> None:
             req_id = msg.get("id")
             action = msg.get("action", "")
             body = msg.get("body") or {}
+
             ok, res_body, err = _handle_request(action, body)
             resp = format_response(req_id, ok, res_body, err)
             resp_bytes = json.dumps(resp, ensure_ascii=False).encode("utf-8")
