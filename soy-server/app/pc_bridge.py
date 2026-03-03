@@ -191,15 +191,8 @@ def _serial_loop() -> None:
         print(msg, flush=True)
         return
     try:
-        if SERIAL_PORT.startswith("socket://"):
-            # 시리얼 over TCP (Mac 등에서 socat으로 시리얼을 TCP로 열어둔 경우)
-            # 예: socat TCP-LISTEN:2000,reuseaddr,fork FILE:/dev/cu.usbmodem101,raw,echo=0
-            #     SOY_REGISTER_SERIAL_PORT=socket://host.docker.internal:2000
-            ser = serial.serial_for_url(SERIAL_PORT, timeout=0.5)
-            msg = f"[Serial] opened TCP {SERIAL_PORT}"
-        else:
-            ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=0.5)
-            msg = f"[Serial] opened {SERIAL_PORT} @ {SERIAL_BAUD} baud"
+        ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=0.5)
+        msg = f"[Serial] opened {SERIAL_PORT} @ {SERIAL_BAUD} baud"
         logger.info(msg)
         print(msg, flush=True)
     except Exception as e:

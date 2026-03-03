@@ -20,4 +20,5 @@ dependencies = [
     "qrcode[pil]>=8.2",
     "opencv-python-headless>=4.8.0",
     "pyzbar>=0.1.9",
+    "paho-mqtt>=2.0.0",
 ]
