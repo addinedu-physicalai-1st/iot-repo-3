@@ -69,8 +69,11 @@ services:
     ports:
       - "1883:1883"
     volumes:
-      - mqtt_data:/mosquitto/data
-      - mqtt_log:/mosquitto/log
+      # 설정 파일을 컨테이너와 연결
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      # 데이터와 로그를 로컬 폴더에 저장 (이미지의 볼륨 대신 실제 폴더 연결 추천)
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
     restart: unless-stopped
 
   # access-controller:
