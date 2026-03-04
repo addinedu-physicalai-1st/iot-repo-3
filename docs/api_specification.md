@@ -45,10 +45,13 @@
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **분류 시작** | DC 모터·카메라 구동 | `PC → ESP32` | `device/control` | `"SORT_START"` | DevKit: DC 구동, CAM: UDP 스트리밍 시작 |
 | **분류 종료** | DC 모터·카메라 정지 | `PC → ESP32` | `device/control` | `"SORT_STOP"` | DevKit: DC 정지, CAM: UDP 스트리밍 중지 |
+| **일시정지** | DC 모터 정지, 카메라 유지 | `PC → ESP32` | `device/control` | `"SORT_PAUSE"` | DevKit: DC brake, PAUSED 상태 진입. DB 상태는 RUNNING 유지 |
+| **재개** | DC 모터 재구동 | `PC → ESP32` | `device/control` | `"SORT_RESUME"` | DevKit: DC 재구동, RUNNING 복귀 |
+| **분류 방향 지시** | QR 스캔 결과에 따른 분류 방향 | `PC → ESP32` | `device/control` | `"SORT_DIR:1L"`<br>`"SORT_DIR:2L"`<br>`"SORT_DIR:WARN"` | DETECTED 이벤트 수신 시 QR Queue에서 꺼내 발행 |
 | **근접 센서 상태** | 센서 감지 상태의 변화 알림 | `ESP32 → PC` | `device/sensor` | `"PROXIMITY:1"` (감지)<br>`"PROXIMITY:0"` (미감지) | GUI 화면 표시용 업데이트 |
 | **분류 진입 알림** | 컨베이어 끝에서 물체 확인 | `ESP32 → PC` | `device/sensor` | `"DETECTED"` | 이 시점에 물체가 멈추고 분류 진행됨 |
 | **분류 완료 알림** | 물리적인 분류 처리가 끝남 | `ESP32 → PC` | `device/sensor` | `"SORTED_1L"`<br>`"SORTED_2L"`<br>`"SORTED_UNCLASSIFIED"`| PC는 이 값을 받고<br>서버로 `process_update` 요청 |
-| **FSM 상태 변경** | 기기의 시스템 상태 | `ESP32 → PC` | `device/status` | `{"state": "IDLE"}`<br>`{"state": "RUNNING"}`<br>`{"state": "SORTING"}`<br>`{"state": "WARNING"}`| JSON 포맷. 화면의 공정 단계 컬러 배지를 바꿈. |
+| **FSM 상태 변경** | 기기의 시스템 상태 | `ESP32 → PC` | `device/status` | `{"state": "IDLE"}`<br>`{"state": "RUNNING"}`<br>`{"state": "SORTING"}`<br>`{"state": "PAUSED"}`<br>`{"state": "WARNING"}`| JSON 포맷. 화면의 공정 단계 컬러 배지를 바꿈. PAUSED 상태에서는 Watchdog 비활성화 |
 
 ---
 

@@ -546,12 +546,32 @@
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout_classify_buttons">
          <item>
-          <widget class="QPushButton" name="classifyToggleButton">
+          <widget class="QPushButton" name="classifyStartButton">
            <property name="enabled">
             <bool>false</bool>
            </property>
            <property name="text">
             <string>시작</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="classifyPauseButton">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="text">
+            <string>일시정지</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="classifyStopButton">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="text">
+            <string>중지</string>
            </property>
           </widget>
          </item>

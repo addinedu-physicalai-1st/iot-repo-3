@@ -20,7 +20,7 @@ from qfluentwidgets import FluentWidget, setTheme, setThemeColor, Theme
 from features.admin_registration import ensure_admin_registered
 from features.admin_screen import setup_admin_screen
 from features.lock_screen import setup_lock_screen
-from features.worker_screen import setup_worker_screen
+from features.worker import setup_worker_screen
 from mqtt_client import mqtt_client
 from theme import BG_MAIN, FACTORY_STYLESHEET
 
