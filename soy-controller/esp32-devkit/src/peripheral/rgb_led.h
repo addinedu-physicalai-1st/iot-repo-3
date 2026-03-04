@@ -7,6 +7,7 @@
  *   RUNNING → 초록
  *   SORTING → 파랑
  *   WARNING → 노랑 (R+G)
+ *   PAUSED  → 노랑 (R+G)
  */
 #pragma once
 #include "fsm.h"

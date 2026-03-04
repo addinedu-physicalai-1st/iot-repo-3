@@ -1,7 +1,7 @@
 # SoyFactory 프로토콜 명세서
 
 > **문서 기준**: 현재 구현된 코드 (`main` 브랜치) 기준  
-> **최종 갱신**: 2026-03-03
+> **최종 갱신**: 2026-03-04
 
 ---
 
@@ -37,11 +37,16 @@
 |--------|------|------|-----------|
 | `SORT_START` | 문자열 | 분류 시작 (DC·카메라 구동) | DevKit + CAM |
 | `SORT_STOP` | 문자열 | 분류 종료 (DC·카메라 정지) | DevKit + CAM |
+| `SORT_PAUSE` | 문자열 | 일시정지 (DC brake, 카메라 유지) | DevKit |
+| `SORT_RESUME` | 문자열 | 일시정지 해제 (DC 재구동) | DevKit |
+| `SORT_DIR:{방향}` | 문자열 | 분류 방향 지시 (`1L` / `2L` / `WARN`) | DevKit |
 
 > **발행 시점 (soy-pc):**
-> - `SORT_START` — 작업자가 "공정 시작" 버튼 클릭 시
-> - `SORT_STOP` — 작업자가 "공정 중지" 버튼 클릭 시, 또는 공정 자동 완료 시  
-> 분류 방향(1L/2L/WARN) 및 센서·서보 제어는 ESP32-DevKit이 자체 담당하며, soy-pc는 시작/종료만 제어한다.
+> - `SORT_START` — 작업자가 "시작" 버튼 클릭 시
+> - `SORT_PAUSE` — 작업자가 "일시정지" 버튼 클릭 시
+> - `SORT_RESUME` — 작업자가 "재개" 버튼 클릭 시 (일시정지 → 재개)
+> - `SORT_STOP` — 작업자가 "중지" 버튼 클릭 시, 또는 공정 자동 완료 시
+> - `SORT_DIR:{방향}` — ESP32 S1/S2 센서에서 `DETECTED` 수신 시, QR Queue에서 방향을 꺼내 발행
 
 #### 토픽: `device/sensor` (ESP32-DevKit → soy-pc)
 
@@ -69,28 +74,35 @@
 | `{"state":"RUNNING"}` | JSON | 공정 진행 중 |
 | `{"state":"SORTING"}` | JSON | 분류 동작 중 |
 | `{"state":"WARNING"}` | JSON | 미등록 QR 경고 중 |
+| `{"state":"PAUSED"}` | JSON | 일시정지 상태 |
 
 > **soy-pc 수신 처리:**
 > - FSM 상태 표시 UI 업데이트 (컬러 배지)
 > - Watchdog: ESP32가 `IDLE`인데 soy-pc에서 공정이 진행 중이면 `SORT_START` 재전송
+> - **단, `PAUSED` 상태에서는 Watchdog 비활성화** (의도적 일시정지이므로 재전송 불필요)
 
 ### 2.3 구독/발행 맵
 
 ```
-┌──────────────────────────────────────────────────────┐
-│ soy-pc (paho-mqtt, Client ID: "soy-pc")              │
-│   Pub  → device/control                              │
-│   Sub  ← device/sensor                               │
-│   Sub  ← device/status                               │
-├──────────────────────────────────────────────────────┤
-│ ESP32-DevKit (PubSubClient, ID: "SoyDevKit-xxxx")    │
-│   Sub  ← device/control                              │
-│   Pub  → device/sensor                               │
-│   Pub  → device/status                               │
-├──────────────────────────────────────────────────────┤
-│ ESP32-CAM (PubSubClient, ID: "SoyCam-xxxx")          │
-│   Sub  ← device/control  (SORT_START/SORT_STOP → UDP 스트리밍 on/off) │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ soy-pc (paho-mqtt, Client ID: "soy-pc")                          │
+│   Pub  → device/control  (SORT_START / SORT_STOP /               │
+│                            SORT_PAUSE / SORT_RESUME /            │
+│                            SORT_DIR:{1L|2L|WARN})                │
+│   Sub  ← device/sensor                                           │
+│   Sub  ← device/status                                           │
+├──────────────────────────────────────────────────────────────────┤
+│ ESP32-DevKit (PubSubClient, ID: "SoyDevKit-xxxx")                │
+│   Sub  ← device/control                                          │
+│   Pub  → device/sensor   (PROXIMITY:* / DETECTED /               │
+│                            SORTED_1L / SORTED_2L /               │
+│                            SORTED_UNCLASSIFIED)                  │
+│   Pub  → device/status   (IDLE / RUNNING / SORTING /             │
+│                            PAUSED / WARNING)                     │
+├──────────────────────────────────────────────────────────────────┤
+│ ESP32-CAM (PubSubClient, ID: "SoyCam-xxxx")                      │
+│   Sub  ← device/control  (SORT_START → UDP ON, SORT_STOP → OFF)  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
