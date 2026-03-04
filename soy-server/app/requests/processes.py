@@ -7,9 +7,16 @@ Result = tuple[bool, Any, str]
 
 
 def handle(action: str, body: dict[str, Any]) -> Result | None:
-    """list_processes, process_start, process_stop, process_update."""
+    """list_processes, process_start, process_stop, process_update, list_item_sorting_logs."""
     if action == "list_processes":
         lst = processes_module.list_processes()
+        return (True, lst, "")
+    if action == "list_item_sorting_logs":
+        lst = processes_module.list_item_sorting_logs(
+            start_date=body.get("start_date"),
+            end_date=body.get("end_date"),
+            search_text=body.get("search_text"),
+        )
         return (True, lst, "")
     if action == "process_start":
         pid = body.get("process_id")

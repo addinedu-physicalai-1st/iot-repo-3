@@ -93,6 +93,13 @@ class OrderItem(Base):
     order: Mapped["Order"] = relationship("Order", back_populates="order_items")
 
 
+class Product(Base):
+    __tablename__ = "products"
+
+    item_code: Mapped[str] = mapped_column(String(50), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
 class Process(Base):
     __tablename__ = "processes"
 
@@ -111,3 +118,20 @@ class Process(Base):
     unclassified_qty: Mapped[int] = mapped_column("unclassified_qty", Integer, nullable=False, default=0)
 
     order: Mapped["Order"] = relationship("Order", back_populates="processes")
+
+
+class ItemSortingLog(Base):
+    __tablename__ = "item_sorting_logs"
+
+    log_id: Mapped[int] = mapped_column(
+        "log_id", Integer, primary_key=True, autoincrement=True
+    )
+    process_id: Mapped[int] = mapped_column(
+        "process_id", Integer, ForeignKey("processes.process_id", ondelete="CASCADE"), nullable=False
+    )
+    box_qr_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    item_code: Mapped[str | None] = mapped_column(String(50), ForeignKey("products.item_code", ondelete="SET NULL"), nullable=True)
+    expiration_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    inventory_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_error: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)

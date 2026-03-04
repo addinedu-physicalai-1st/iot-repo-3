@@ -11,6 +11,7 @@ from api.client import (
     get_order,
     get_order_id_by_order_item_id,
     list_access_logs,
+    list_item_sorting_logs,
     list_orders,
     list_processes,
     list_workers,
@@ -24,6 +25,7 @@ from api.client import (
 __all__ = [
     "get_first_admin_id",
     "list_access_logs",
+    "list_item_sorting_logs",
     "list_workers",
     "create_worker",
     "update_worker",

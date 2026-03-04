@@ -7,11 +7,11 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, and_, or_
 from sqlalchemy.engine import Engine
 
 from app.database import get_session
-from app.models import Order, Process
+from app.models import Order, Process, ItemSortingLog, Product
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,60 @@ def list_processes(engine: Engine | None = None) -> list[dict[str, Any]]:
                     "success_2l_qty": p.success_2l_qty,
                     "unclassified_qty": p.unclassified_qty,
                     "order_total_qty": order_total_qty,
+                }
+            )
+        return result
+
+
+def list_item_sorting_logs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    search_text: str | None = None,
+    engine: Engine | None = None,
+) -> list[dict[str, Any]]:
+    """작업 로그 목록 조회 (최신순). 기간 및 물품 코드 필터 지원."""
+    with get_session() as session:
+        # ItemSortingLog와 Product를 item_code로 조인하여 품목명(name)을 함께 가져옴
+        stmt = select(ItemSortingLog, Product.name.label("product_name")).outerjoin(
+            Product, ItemSortingLog.item_code == Product.item_code
+        )
+
+        if start_date:
+            try:
+                dt_start = datetime.fromisoformat(start_date.replace("Z", ""))
+                stmt = stmt.where(ItemSortingLog.timestamp >= dt_start)
+            except ValueError:
+                pass
+        if end_date:
+            try:
+                dt_end = datetime.fromisoformat(end_date.replace("Z", ""))
+                # 종료일이 날짜(10자)만 들어온 경우 해당 날짜의 23:59:59까지 포함
+                if len(end_date) <= 10:
+                    dt_end = dt_end.replace(hour=23, minute=59, second=59)
+                stmt = stmt.where(ItemSortingLog.timestamp <= dt_end)
+            except ValueError:
+                pass
+
+        if search_text:
+            # 물품 코드로 검색
+            stmt = stmt.where(ItemSortingLog.item_code.like(f"%{search_text}%"))
+
+        stmt = stmt.order_by(desc(ItemSortingLog.timestamp))
+        rows = session.execute(stmt).all()
+
+        result = []
+        for log, p_name in rows:
+            result.append(
+                {
+                    "log_id": log.log_id,
+                    "process_id": log.process_id,
+                    "product_name": p_name or log.item_code or "알 수 없음",
+                    "box_qr_code": log.box_qr_code,
+                    "is_error": bool(log.is_error),
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                    "expiration_date": (
+                        log.expiration_date.isoformat() if log.expiration_date else None
+                    ),
                 }
             )
         return result

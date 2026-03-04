@@ -15,6 +15,7 @@ from api import (
     delete_worker as api_delete_worker,
     get_first_admin_id,
     list_access_logs,
+    list_item_sorting_logs,
     list_workers,
     update_worker as api_update_worker,
 )
@@ -128,6 +129,18 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     admin.accessLogTable.setHorizontalHeaderLabels(
         ["작업자 이름", "출입 방향", "일시"]
     )
+    admin.itemSortingLogTable.setHorizontalHeaderLabels(
+        ["품목명", "QR 코드", "상태", "작업시간"]
+    )
+
+    from PyQt6.QtCore import QDate
+    admin.startDateEdit.setDate(QDate.currentDate().addDays(-7))
+    admin.endDateEdit.setDate(QDate.currentDate())
+
+    # 체크박스 연결
+    admin.itemSearchCheckBox.toggled.connect(admin.itemSearchEdit.setEnabled)
+    admin.dateSearchCheckBox.toggled.connect(admin.startDateEdit.setEnabled)
+    admin.dateSearchCheckBox.toggled.connect(admin.endDateEdit.setEnabled)
 
     def _format_created_at(created_at: str) -> str:
         """API created_at (ISO) → 날짜만 표시 (YYYY-MM-DD)."""
@@ -167,6 +180,43 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                 QTableWidgetItem(_format_checked_at(entry.get("checked_at", ""))),
             )
 
+    def refresh_item_sorting_logs():
+        # 체크박스 상태에 따라 검색 조건 포함 여부 결정
+        start_date = None
+        end_date = None
+        search_text = None
+
+        if admin.dateSearchCheckBox.isChecked():
+            start_date = admin.startDateEdit.date().toString("yyyy-MM-dd")
+            end_date = admin.endDateEdit.date().toString("yyyy-MM-dd")
+        
+        if admin.itemSearchCheckBox.isChecked():
+            search_text = admin.itemSearchEdit.text().strip()
+
+        try:
+            logs = list_item_sorting_logs(
+                start_date=start_date, end_date=end_date, search_text=search_text
+            )
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            admin.itemSortingLogTable.setRowCount(0)
+            return
+
+        admin.itemSortingLogTable.setRowCount(0)
+        for entry in logs:
+            row = admin.itemSortingLogTable.rowCount()
+            admin.itemSortingLogTable.insertRow(row)
+            admin.itemSortingLogTable.setItem(
+                row, 0, QTableWidgetItem(entry.get("product_name", ""))
+            )
+            is_error = entry.get("is_error", False)
+            status_text = "오류" if is_error else "정상"
+            admin.itemSortingLogTable.setItem(row, 2, QTableWidgetItem(status_text))
+            admin.itemSortingLogTable.setItem(
+                row,
+                3,
+                QTableWidgetItem(_format_checked_at(entry.get("timestamp", ""))),
+            )
+
     def refresh_workers():
         try:
             workers = list_workers()
@@ -204,8 +254,11 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
 
     def on_current_changed(index: int):
         if stacked.widget(index) == admin:
-            if admin.admin_content_stack.currentWidget() == admin.admin_content_stack.widget(1):
+            current_idx = admin.admin_content_stack.currentIndex()
+            if current_idx == 1:
                 refresh_access_logs()
+            elif current_idx == 2:
+                refresh_item_sorting_logs()
             else:
                 refresh_workers()
 
@@ -216,6 +269,8 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
             return
         if idx == 1:
             refresh_access_logs()
+        elif idx == 2:
+            refresh_item_sorting_logs()
         else:
             refresh_workers()
 
@@ -224,18 +279,30 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     def show_worker_management():
         admin.menu_worker_management.setChecked(True)
         admin.menu_access_log.setChecked(False)
+        admin.menu_item_sorting_log.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(0)
         refresh_workers()
 
     def show_access_log():
         admin.menu_worker_management.setChecked(False)
         admin.menu_access_log.setChecked(True)
+        admin.menu_item_sorting_log.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(1)
         refresh_access_logs()
 
+    def show_item_sorting_log():
+        admin.menu_worker_management.setChecked(False)
+        admin.menu_access_log.setChecked(False)
+        admin.menu_item_sorting_log.setChecked(True)
+        admin.admin_content_stack.setCurrentIndex(2)
+        refresh_item_sorting_logs()
+
     admin.menu_worker_management.clicked.connect(show_worker_management)
     admin.menu_access_log.clicked.connect(show_access_log)
+    admin.menu_item_sorting_log.clicked.connect(show_item_sorting_log)
     admin.refreshAccessLogButton.clicked.connect(refresh_access_logs)
+    admin.itemSortingLogSearchButton.clicked.connect(refresh_item_sorting_logs)
+    admin.itemSearchEdit.returnPressed.connect(refresh_item_sorting_logs)
 
     def on_access_log_search():
         refresh_access_logs()

@@ -332,6 +332,28 @@ def list_access_logs(
     return res if isinstance(res, list) else []
 
 
+def list_item_sorting_logs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    search_text: str | None = None,
+) -> list[dict]:
+    """작업 로그 목록 조회 (관리자 로그인 필요)."""
+    req_body: dict = {}
+    if start_date:
+        req_body["start_date"] = start_date
+    if end_date:
+        req_body["end_date"] = end_date
+    if search_text:
+        req_body["search_text"] = search_text
+
+    ok, res, err = _request("list_item_sorting_logs", req_body)
+    if not ok:
+        raise RuntimeError(err or "list_item_sorting_logs failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
 def create_worker(admin_id: int, name: str, card_uid: str) -> dict:
     """작업자 등록. card_uid 중복 시 WorkerCreateConflict."""
     ok, body, err = _request(

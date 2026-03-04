@@ -42,9 +42,15 @@ def handle_no_auth(
 
 
 def handle_admin_only(action: str, body: dict[str, Any]) -> Result:
-    """admin 인증 후에만 호출. Worker CRUD 등."""
+    """admin 인증 후에만 호출. Worker CRUD 및 관리자 전용 조회 액션."""
     logger.info("admin 인증 후에만 호출. Worker CRUD 등.")
-    return _workers.handle(action, body)
+    res = _workers.handle(action, body)
+    if res is not None:
+        return res
+    res = _processes.handle(action, body)
+    if res is not None:
+        return res
+    return (False, None, f"Unknown admin action: {action}")
 
 
 __all__ = ["Result", "handle_no_auth", "handle_admin_only"]
