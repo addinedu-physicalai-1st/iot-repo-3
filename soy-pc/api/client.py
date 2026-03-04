@@ -332,6 +332,16 @@ def list_access_logs(
     return res if isinstance(res, list) else []
 
 
+def list_inventory() -> list[dict]:
+    """창고 재고 목록 (관리자 로그인 필요)."""
+    ok, res, err = _request("list_inventory", {})
+    if not ok:
+        raise RuntimeError(err or "list_inventory failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
 def list_item_sorting_logs(
     start_date: str | None = None,
     end_date: str | None = None,

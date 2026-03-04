@@ -1,5 +1,6 @@
 """관리자 화면 — 사이드바 메뉴, 작업자 관리(목록·CRUD). soy-server TCP 연동."""
 import os
+from datetime import datetime
 
 from PyQt6 import uic
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
@@ -15,12 +16,16 @@ from api import (
     delete_worker as api_delete_worker,
     get_first_admin_id,
     list_access_logs,
+    list_inventory,
     list_item_sorting_logs,
     list_workers,
     update_worker as api_update_worker,
 )
+from PyQt6.QtWidgets import QFileDialog
+
 from api.client import admin_logout, set_card_read_callback
 from serial_rfid import SerialRFIDReader, get_register_serial_port
+from widgets.donut_chart import DonutChartWidget
 
 _USE_SERVER_RFID = os.environ.get("SOY_USE_SERVER_RFID", "1").strip().lower() not in ("0", "false", "no")
 
@@ -132,6 +137,13 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     admin.itemSortingLogTable.setHorizontalHeaderLabels(
         ["품목명", "QR 코드", "상태", "작업시간"]
     )
+
+    # 재고 리포트: 도넛 차트 위젯
+    from PyQt6.QtWidgets import QVBoxLayout
+    inventory_chart = DonutChartWidget(admin.inventoryChartContainer)
+    layout = QVBoxLayout(admin.inventoryChartContainer)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(inventory_chart)
 
     from PyQt6.QtCore import QDate
     admin.startDateEdit.setDate(QDate.currentDate().addDays(-7))
@@ -252,6 +264,19 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
 
     admin.workerTable.cellClicked.connect(on_worker_cell_clicked)
 
+    def refresh_inventory_report():
+        inv: list[dict] = []
+        try:
+            inv = list_inventory()
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            pass
+        if not inv:
+            # API 실패 시 soy_db 직접 조회 (fallback)
+            from db.inventory import list_inventory as db_list_inventory
+            inv = db_list_inventory()
+        data = [(e.get("inventory_name", ""), e.get("current_qty", 0) or 0) for e in inv]
+        inventory_chart.set_data(data)
+
     def on_current_changed(index: int):
         if stacked.widget(index) == admin:
             current_idx = admin.admin_content_stack.currentIndex()
@@ -259,6 +284,8 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                 refresh_access_logs()
             elif current_idx == 2:
                 refresh_item_sorting_logs()
+            elif current_idx == 3:
+                refresh_inventory_report()
             else:
                 refresh_workers()
 
@@ -271,6 +298,8 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
             refresh_access_logs()
         elif idx == 2:
             refresh_item_sorting_logs()
+        elif idx == 3:
+            refresh_inventory_report()
         else:
             refresh_workers()
 
@@ -280,6 +309,7 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         admin.menu_worker_management.setChecked(True)
         admin.menu_access_log.setChecked(False)
         admin.menu_item_sorting_log.setChecked(False)
+        admin.menu_inventory_report.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(0)
         refresh_workers()
 
@@ -287,6 +317,7 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         admin.menu_worker_management.setChecked(False)
         admin.menu_access_log.setChecked(True)
         admin.menu_item_sorting_log.setChecked(False)
+        admin.menu_inventory_report.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(1)
         refresh_access_logs()
 
@@ -294,12 +325,65 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         admin.menu_worker_management.setChecked(False)
         admin.menu_access_log.setChecked(False)
         admin.menu_item_sorting_log.setChecked(True)
+        admin.menu_inventory_report.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(2)
         refresh_item_sorting_logs()
+
+    def show_inventory_report():
+        admin.menu_worker_management.setChecked(False)
+        admin.menu_access_log.setChecked(False)
+        admin.menu_item_sorting_log.setChecked(False)
+        admin.menu_inventory_report.setChecked(True)
+        admin.admin_content_stack.setCurrentIndex(3)
+        refresh_inventory_report()
 
     admin.menu_worker_management.clicked.connect(show_worker_management)
     admin.menu_access_log.clicked.connect(show_access_log)
     admin.menu_item_sorting_log.clicked.connect(show_item_sorting_log)
+    admin.menu_inventory_report.clicked.connect(show_inventory_report)
+    admin.refreshInventoryButton.clicked.connect(refresh_inventory_report)
+
+    def export_inventory_to_pdf():
+        import tempfile
+        from features.inventory_pdf import export_inventory_pdf
+        data = inventory_chart.get_data()
+        if not data:
+            box = MessageBox("PDF 출력", "표시할 재고 데이터가 없습니다. 새로고침 후 다시 시도하세요.", window)
+            box.cancelButton.hide()
+            box.yesButton.setText("확인")
+            box.exec()
+            return
+        pixmap = inventory_chart.grab()
+        chart_path = None
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            chart_path = f.name
+        try:
+            pixmap.save(chart_path, "PNG")
+            path, _ = QFileDialog.getSaveFileName(
+                window,
+                "PDF 저장",
+                f"재고리포트_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                "PDF 파일 (*.pdf)",
+            )
+            if path:
+                export_inventory_pdf(data, chart_path, path)
+                box = MessageBox("저장 완료", f"PDF가 저장되었습니다.\n{path}", window)
+                box.cancelButton.hide()
+                box.yesButton.setText("확인")
+                box.exec()
+        except Exception as e:
+            box = MessageBox("PDF 저장 실패", str(e), window)
+            box.cancelButton.hide()
+            box.yesButton.setText("확인")
+            box.exec()
+        finally:
+            if chart_path and os.path.exists(chart_path):
+                try:
+                    os.unlink(chart_path)
+                except Exception:
+                    pass
+
+    admin.exportInventoryPdfButton.clicked.connect(export_inventory_to_pdf)
     admin.refreshAccessLogButton.clicked.connect(refresh_access_logs)
     admin.itemSortingLogSearchButton.clicked.connect(refresh_item_sorting_logs)
     admin.itemSearchEdit.returnPressed.connect(refresh_item_sorting_logs)

@@ -9,6 +9,7 @@ Result = tuple[bool, Any, str]
 from app.requests import auth as _auth
 from app.requests import orders as _orders
 from app.requests import processes as _processes
+from app.requests import reporting as _reporting
 from app.requests import workers as _workers
 
 import logging
@@ -45,6 +46,9 @@ def handle_admin_only(action: str, body: dict[str, Any]) -> Result:
     """admin 인증 후에만 호출. Worker CRUD 및 관리자 전용 조회 액션."""
     logger.info("admin 인증 후에만 호출. Worker CRUD 등.")
     res = _workers.handle(action, body)
+    if res is not None:
+        return res
+    res = _reporting.handle(action, body)
     if res is not None:
         return res
     res = _processes.handle(action, body)

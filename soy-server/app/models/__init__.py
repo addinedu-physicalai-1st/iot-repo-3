@@ -120,6 +120,19 @@ class Process(Base):
     order: Mapped["Order"] = relationship("Order", back_populates="processes")
 
 
+class Inventory(Base):
+    __tablename__ = "inventory"
+
+    inventory_id: Mapped[int] = mapped_column(
+        "inventory_id", Integer, primary_key=True, autoincrement=True
+    )
+    inventory_name: Mapped[str] = mapped_column("inventory_name", String(100), nullable=False)
+    current_qty: Mapped[int] = mapped_column("current_qty", Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updated_at", DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+
 class ItemSortingLog(Base):
     __tablename__ = "item_sorting_logs"
 
