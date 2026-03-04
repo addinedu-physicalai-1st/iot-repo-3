@@ -340,9 +340,8 @@
           <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
          </property>
          <property name="alternatingRowColors">
-          <bool>true</bool>
-         </property>
-         <attribute name="horizontalHeaderDefaultSectionSize">
+          <bool>false</bool>
+         </property>         <attribute name="horizontalHeaderDefaultSectionSize">
           <number>100</number>
          </attribute>
          <attribute name="horizontalHeaderStretchLastSection">
@@ -440,9 +439,8 @@
           <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
          </property>
          <property name="alternatingRowColors">
-          <bool>true</bool>
-         </property>
-         <attribute name="horizontalHeaderStretchLastSection">
+          <bool>false</bool>
+         </property>         <attribute name="horizontalHeaderStretchLastSection">
           <bool>true</bool>
          </attribute>
         </widget>
@@ -533,9 +531,8 @@
           <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
          </property>
          <property name="alternatingRowColors">
-          <bool>true</bool>
-         </property>
-         <attribute name="horizontalHeaderDefaultSectionSize">
+          <bool>false</bool>
+         </property>         <attribute name="horizontalHeaderDefaultSectionSize">
           <number>100</number>
          </attribute>
          <attribute name="horizontalHeaderStretchLastSection">
