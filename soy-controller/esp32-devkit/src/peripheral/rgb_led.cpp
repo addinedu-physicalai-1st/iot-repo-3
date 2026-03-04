@@ -29,5 +29,6 @@ void RgbLed::forState(State s) {
         case State::RUNNING: green();  break;
         case State::SORTING: blue();   break;
         case State::WARNING: yellow(); break;
+        case State::PAUSED:  yellow(); break;
     }
 }

@@ -6,6 +6,7 @@ const char* Fsm::stateName() const {
         case State::RUNNING: return "RUNNING";
         case State::SORTING: return "SORTING";
         case State::WARNING: return "WARNING";
+        case State::PAUSED:  return "PAUSED";
         default:             return "UNKNOWN";
     }
 }
