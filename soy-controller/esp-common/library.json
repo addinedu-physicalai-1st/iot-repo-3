@@ -1,0 +1,12 @@
+{
+  "name": "esp-common",
+  "version": "1.0.0",
+  "description": "ESP32-CAM / ESP32-DevKit 공통: WiFi, MQTT 상수",
+  "keywords": "wifi, soy-factory",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

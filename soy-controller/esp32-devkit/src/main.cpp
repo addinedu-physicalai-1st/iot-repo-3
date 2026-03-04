@@ -85,44 +85,25 @@ static void enterState(State s) {
     }
 }
 
-// ── MQTT 명령 콜백 ────────────────────────────────────────────
+// ── MQTT 명령 콜백 (soy-server는 SORT_START/SORT_STOP만 발행) ───
 static void onCommand(const Command& cmd) {
     switch (cmd.type) {
-        case CommandType::DC_START:
+        case CommandType::SORT_START:
             if (fsm.state() == State::SORTING) {
-                Serial.println("[WARN] DC_START ignored (SORTING in progress)");
+                Serial.println("[WARN] SORT_START ignored (SORTING in progress)");
                 return;
             }
-            _dcSpeed = (cmd.speed >= 0) ? cmd.speed : config::dc::DEFAULT_SPEED;
             enterState(State::RUNNING);
             break;
 
-        case CommandType::DC_STOP:
+        case CommandType::SORT_STOP:
             if (fsm.state() == State::SORTING) {
-                Serial.println("[WARN] DC_STOP ignored (SORTING in progress)");
+                Serial.println("[WARN] SORT_STOP ignored (SORTING in progress)");
                 return;
             }
             if (fsm.state() != State::IDLE) {
                 enterState(State::IDLE);
             }
-            break;
-
-        case CommandType::SORT_DIR_1L:
-            _currentSortDir = SortDir::LINE_1L;
-            Serial.println("[SORT_DIR] 1L");
-            break;
-
-        case CommandType::SORT_DIR_2L:
-            _currentSortDir = SortDir::LINE_2L;
-            Serial.println("[SORT_DIR] 2L");
-            break;
-
-        case CommandType::SORT_DIR_WARN:
-            _currentSortDir = SortDir::NONE;
-            if (fsm.state() == State::RUNNING) {
-                enterState(State::WARNING);
-            }
-            Serial.println("[SORT_DIR] WARN");
             break;
 
         default:
@@ -214,6 +195,22 @@ static void handleProximity() {
     _sensorPrev = det;
 }
 
+// ── FSM 디스패치 ─────────────────────────────────────────────
+/** esp32-cam과 동일 패턴: loop에서 mqtt.loop() 후 runFsm() 호출 */
+static void runFsm() {
+    switch (fsm.state()) {
+        case State::SORTING:
+            handleSorting();
+            break;
+        case State::WARNING:
+            handleWarning();
+            break;
+        default:
+            handleProximity();
+            break;
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // Setup
 // ══════════════════════════════════════════════════════════════
@@ -252,7 +249,6 @@ void setup() {
 // Loop
 // ══════════════════════════════════════════════════════════════
 void loop() {
-    // MQTT 유지
     mqtt.loop();
 
     // 근접센서 ADC 실시간 디버그 (500ms마다)
@@ -271,16 +267,5 @@ void loop() {
         }
     }
 
-    // FSM 처리
-    switch (fsm.state()) {
-        case State::SORTING:
-            handleSorting();
-            break;
-        case State::WARNING:
-            handleWarning();
-            break;
-        default:
-            handleProximity();
-            break;
-    }
+    runFsm();
 }

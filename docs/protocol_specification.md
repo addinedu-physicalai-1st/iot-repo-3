@@ -35,18 +35,13 @@
 
 | 메시지 | 포맷 | 설명 | 처리 주체 |
 |--------|------|------|-----------|
-| `DC_START` | 문자열 | DC 모터 시작 (기본 속도) | DevKit + CAM |
-| `DC_START:<speed>` | `DC_START:200` | DC 모터 시작 (속도 0–255) | DevKit + CAM |
-| `DC_STOP` | 문자열 | DC 모터 정지 | DevKit + CAM |
-| `SORT_DIR:1L` | 문자열 | 분류 방향 = 1L 라인 | DevKit만 |
-| `SORT_DIR:2L` | 문자열 | 분류 방향 = 2L 라인 | DevKit만 |
-| `SORT_DIR:WARN` | 문자열 | 미등록 QR 경고 | DevKit만 |
+| `SORT_START` | 문자열 | 분류 시작 (DC·카메라 구동) | DevKit + CAM |
+| `SORT_STOP` | 문자열 | 분류 종료 (DC·카메라 정지) | DevKit + CAM |
 
 > **발행 시점 (soy-pc):**
-> - `DC_START:{speed}` — 작업자가 "공정 시작" 버튼 클릭 시
-> - `DC_STOP` — 작업자가 "공정 중지" 버튼 클릭 시, 또는 공정 자동 완료 시
-> - `SORT_DIR:1L` / `SORT_DIR:2L` — ESP32-CAM UDP 스트림에서 QR 인식 성공, item_code 접미사가 `_1l` / `_2l`일 때
-> - `SORT_DIR:WARN` — QR 인식 실패, item_code 없음, 미등록 품목, 용량 판별 불가 시
+> - `SORT_START` — 작업자가 "공정 시작" 버튼 클릭 시
+> - `SORT_STOP` — 작업자가 "공정 중지" 버튼 클릭 시, 또는 공정 자동 완료 시  
+> 분류 방향(1L/2L/WARN) 및 센서·서보 제어는 ESP32-DevKit이 자체 담당하며, soy-pc는 시작/종료만 제어한다.
 
 #### 토픽: `device/sensor` (ESP32-DevKit → soy-pc)
 
@@ -64,7 +59,7 @@
 > - `SORTED_1L` → DB `process.success_1l_qty += 1` 업데이트 (TCP → soy-server)
 > - `SORTED_2L` → DB `process.success_2l_qty += 1` 업데이트
 > - `SORTED_UNCLASSIFIED` → DB `process.unclassified_qty += 1` 업데이트
-> - 분류 합계가 주문 수량에 도달하면 자동으로 `DC_STOP` 발행 + 공정 종료
+> - 분류 합계가 주문 수량에 도달하면 자동으로 `SORT_STOP` 발행 + 공정 종료
 
 #### 토픽: `device/status` (ESP32-DevKit → soy-pc)
 
@@ -77,7 +72,7 @@
 
 > **soy-pc 수신 처리:**
 > - FSM 상태 표시 UI 업데이트 (컬러 배지)
-> - Watchdog: ESP32가 `IDLE`인데 soy-pc에서 공정이 진행 중이면 `DC_START` 재전송
+> - Watchdog: ESP32가 `IDLE`인데 soy-pc에서 공정이 진행 중이면 `SORT_START` 재전송
 
 ### 2.3 구독/발행 맵
 
@@ -94,7 +89,7 @@
 │   Pub  → device/status                               │
 ├──────────────────────────────────────────────────────┤
 │ ESP32-CAM (PubSubClient, ID: "SoyCam-xxxx")          │
-│   Sub  ← device/control  (DC_START/DC_STOP만 처리)   │
+│   Sub  ← device/control  (SORT_START/SORT_STOP → UDP 스트리밍 on/off) │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -108,8 +103,8 @@
 |------|----|
 | 방향 | ESP32-CAM → soy-pc (단방향) |
 | 포트 | 8021 |
-| 전송 조건 | MQTT `DC_START` 수신 후 시작 |
-| 정지 조건 | MQTT `DC_STOP` 수신 시 정지 |
+| 전송 조건 | MQTT `SORT_START` 수신 후 시작 |
+| 정지 조건 | MQTT `SORT_STOP` 수신 시 정지 |
 | 프레임 레이트 | ~5 FPS (200ms 인터벌) |
 | JPEG 해상도 | QVGA (320×240) |
 | JPEG 품질 | 12 (0–63, 낮을수록 고품질) |
@@ -288,19 +283,17 @@ sequenceDiagram
     W->>PC: "공정 시작" 버튼 클릭
     PC->>SVR: TCP {"action":"process_start","body":{"process_id":1}}
     SVR-->>PC: TCP {"ok":true,"body":{process}}
-    PC->>MQTT: Pub device/control "DC_START:200"
-    MQTT->>DEV: Sub → DC_START:200
-    MQTT->>CAM: Sub → DC_START:200
+    PC->>MQTT: Pub device/control "SORT_START"
+    MQTT->>DEV: Sub → SORT_START
+    MQTT->>CAM: Sub → SORT_START
     DEV->>MQTT: Pub device/status {"state":"RUNNING"}
     MQTT-->>PC: Sub ← RUNNING
 
-    Note over CAM,PC: ② 카메라 스트리밍 + QR 인식
+    Note over CAM,PC: ② 카메라 스트리밍 + QR 인식 (분류 방향은 DevKit 자체 제어)
     loop ~5 FPS
         CAM-->>PC: UDP :8021 IMG 청크 패킷
     end
-    PC->>PC: JPEG 재조립 → pyzbar QR 디코딩
-    PC->>MQTT: Pub device/control "SORT_DIR:1L"
-    MQTT->>DEV: Sub → SORT_DIR:1L
+    PC->>PC: JPEG 재조립 → pyzbar QR 디코딩 (UI 표시용)
 
     Note over DEV: ③ 물체 감지 → 분류
     DEV->>MQTT: Pub device/sensor "PROXIMITY:1"
@@ -317,27 +310,14 @@ sequenceDiagram
 
     Note over W,CAM: ⑤ 목표 수량 도달 → 자동 종료
     PC->>PC: sorted_total >= order_total?
-    PC->>MQTT: Pub device/control "DC_STOP"
+    PC->>MQTT: Pub device/control "SORT_STOP"
     PC->>SVR: TCP {"action":"process_stop","body":{"process_id":1}}
 ```
 
-### 5.2 미등록 QR 경고 흐름
+### 5.2 미등록/경고 처리 (ESP32-DevKit 자체)
 
-```mermaid
-sequenceDiagram
-    participant PC as soy-pc
-    participant MQTT as MQTT Broker
-    participant DEV as ESP32-DevKit
-
-    Note over PC: QR 인식 → 미등록 품목
-    PC->>MQTT: Pub device/control "SORT_DIR:WARN"
-    MQTT->>DEV: Sub → SORT_DIR:WARN
-    Note over DEV: FSM: RUNNING → WARNING
-    DEV->>MQTT: Pub device/status {"state":"WARNING"}
-    Note over DEV: LED 노랑 깜빡임 (250ms 주기)
-    Note over DEV: 3초 후 자동 복귀
-    DEV->>MQTT: Pub device/status {"state":"RUNNING"}
-```
+분류 방향 및 경고(WARNING) 상태는 soy-pc가 MQTT로 보내지 않으며, ESP32-DevKit이 센서·내부 로직으로 처리한다.  
+(필요 시 TCP 등 별도 경로로 방향 지시를 확장할 수 있음.)
 
 ---
 

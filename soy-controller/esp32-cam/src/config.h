@@ -2,9 +2,11 @@
  * config.h — ESP32-CAM 설정 중앙 집중
  *
  * 카메라 핀 매핑, 네트워크 설정, 스트리밍 파라미터를 한 곳에서 관리한다.
+ * MQTT 상수는 esp-common/esp/config_mqtt.h 에서 가져온다.
  */
 #pragma once
 #include <cstdint>
+#include "esp/config_mqtt.h"
 
 namespace config {
 
@@ -41,10 +43,6 @@ namespace camera {
     constexpr unsigned long FRAME_INTERVAL_MS = 200;  // ~5 FPS
 }
 
-// ── MQTT ─────────────────────────────────────────────────────
-namespace mqtt {
-    constexpr const char* TOPIC_CONTROL = "device/control";
-    constexpr int         PORT          = 1883;
-}
+// mqtt (TOPIC_CONTROL, PORT) → esp/config_mqtt.h
 
 }  // namespace config

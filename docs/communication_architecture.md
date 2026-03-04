@@ -20,7 +20,7 @@ graph LR
     end
 
     %% MQTT 통신
-    PC -- "Pub: DC_START/DC_STOP<br/>SORT_DIR:1L/2L/WARN" --> BROKER
+    PC -- "Pub: SORT_START/SORT_STOP" --> BROKER
     BROKER -- "Sub: device/control" --> DEV
     BROKER -- "Sub: device/control" --> CAM
     DEV -- "Pub: device/sensor<br/>device/status" --> BROKER
@@ -43,11 +43,8 @@ graph LR
 
 | 방향 | 토픽 | 메시지 | 설명 |
 |------|------|--------|------|
-| **soy-pc → ESP32** | `device/control` | `DC_START:200` | 컨베이어 시작 (speed 0–255) |
-| | | `DC_STOP` | 컨베이어 정지 |
-| | | `SORT_DIR:1L` | 분류 방향: 1L 라인 |
-| | | `SORT_DIR:2L` | 분류 방향: 2L 라인 |
-| | | `SORT_DIR:WARN` | 미등록 QR 경고 |
+| **soy-pc → ESP32** | `device/control` | `SORT_START` | 분류 시작 (DC·카메라 구동) |
+| | | `SORT_STOP` | 분류 종료 (DC·카메라 정지) |
 | **ESP32-DevKit → soy-pc** | `device/sensor` | `PROXIMITY:1` / `PROXIMITY:0` | 근접 센서 감지/미감지 |
 | | | `DETECTED` | 물체 감지 → SORTING 시작 |
 | | | `SORTED_1L` / `SORTED_2L` | 분류 완료 |
@@ -70,7 +67,7 @@ ESP32-DevKit (PubSubClient)
   └── Publish  → device/status    (상태 발행)
 
 ESP32-CAM (PubSubClient)
-  └── Subscribe ← device/control  (DC_START/DC_STOP만 사용)
+  └── Subscribe ← device/control  (SORT_START/SORT_STOP → UDP 스트리밍 on/off)
 ```
 
 ### 2. UDP (포트 8021) — 카메라 JPEG 스트리밍
@@ -82,8 +79,8 @@ ESP32-CAM (PubSubClient)
 | 프로토콜 | UDP |
 | 방향 | ESP32-CAM → soy-pc |
 | 포트 | 8021 |
-| 전송 조건 | MQTT `DC_START` 수신 후 시작 |
-| 정지 조건 | MQTT `DC_STOP` 수신 시 정지 |
+| 전송 조건 | MQTT `SORT_START` 수신 후 시작 |
+| 정지 조건 | MQTT `SORT_STOP` 수신 시 정지 |
 
 #### 패킷 포맷 (IMG 청크 프로토콜)
 
@@ -123,11 +120,11 @@ sequenceDiagram
     participant DEV as ESP32-DevKit
     participant CAM as ESP32-CAM
 
-    Note over PC,CAM: 1. 작업자가 컨베이어 시작 버튼 클릭
+    Note over PC,CAM: 1. 작업자가 분류 시작 버튼 클릭
 
-    PC->>MQTT: Pub device/control: "DC_START:200"
-    MQTT->>DEV: Sub → DC_START:200
-    MQTT->>CAM: Sub → DC_START:200
+    PC->>MQTT: Pub device/control: "SORT_START"
+    MQTT->>DEV: Sub → SORT_START
+    MQTT->>CAM: Sub → SORT_START
     DEV->>MQTT: Pub device/status: {"state":"RUNNING"}
     MQTT->>PC: Sub ← RUNNING 상태 표시
 
@@ -136,9 +133,7 @@ sequenceDiagram
         CAM-->>PC: UDP :8021 JPEG 청크 전송
     end
 
-    Note over PC,DEV: 3. PC에서 QR 인식 → 분류 방향 전송
-    PC->>MQTT: Pub device/control: "SORT_DIR:1L"
-    MQTT->>DEV: Sub → SORT_DIR:1L
+    Note over PC,DEV: 3. 분류 방향은 ESP32-DevKit이 자체 제어 (센서·서보 등)
 
     Note over DEV: 4. 근접 센서 감지 → SORTING 진입
     DEV->>MQTT: Pub device/sensor: "PROXIMITY:1"

@@ -2,10 +2,11 @@
  * config.h — 설정 중앙 집중
  *
  * 핀 매핑, 타이밍, MQTT 토픽 등 모든 상수를 한 곳에서 관리한다.
- * 변경이 필요하면 이 파일만 수정하면 된다.
+ * MQTT 공통(TOPIC_CONTROL, PORT)은 esp-common/esp/config_mqtt.h 에서 가져온다.
  */
 #pragma once
 #include <cstdint>
+#include "esp/config_mqtt.h"
 
 namespace config {
 
@@ -49,12 +50,10 @@ namespace timing {
     constexpr unsigned long WARNING_MS     = 3000;  // WARNING 자동 복귀 시간
 }
 
-// ── MQTT ─────────────────────────────────────────────────────
+// ── MQTT (TOPIC_CONTROL, PORT → esp/config_mqtt.h) ─────────────
 namespace mqtt {
-    constexpr const char* TOPIC_CONTROL = "device/control";
     constexpr const char* TOPIC_SENSOR  = "device/sensor";
     constexpr const char* TOPIC_STATUS  = "device/status";
-    constexpr int         PORT          = 1883;
 }
 
 }  // namespace config

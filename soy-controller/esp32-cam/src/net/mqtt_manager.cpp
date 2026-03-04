@@ -3,18 +3,18 @@
 #include <Arduino.h>
 
 // ── static 멤버 초기화 ──────────────────────────────────────
-MqttManager*  MqttManager::_instance      = nullptr;
-volatile bool* MqttManager::_streamingFlag = nullptr;
+MqttManager*  MqttManager::_instance       = nullptr;
+volatile StreamingState* MqttManager::_streamingState = nullptr;
 
 #ifndef MQTT_BROKER
   #error ".env file is missing or env_script.py failed to inject MQTT_BROKER"
 #endif
 
-void MqttManager::begin(const char* broker, int port, volatile bool* streamingFlag) {
-    _broker        = broker;
-    _port          = port;
-    _instance      = this;
-    _streamingFlag = streamingFlag;
+void MqttManager::begin(const char* broker, int port, volatile StreamingState* streamingState) {
+    _broker         = broker;
+    _port           = port;
+    _instance       = this;
+    _streamingState = streamingState;
 
     _mqtt.setClient(_wifiClient);
     _mqtt.setServer(_broker, _port);
@@ -61,11 +61,11 @@ void MqttManager::_rawCallback(char* topic, byte* payload, unsigned int length) 
 
     if (strcmp(topic, config::mqtt::TOPIC_CONTROL) != 0) return;
 
-    if (strncmp(msg, "DC_START", 8) == 0) {
-        if (_streamingFlag) *_streamingFlag = true;
-        Serial.println("[CAM] Streaming ON");
-    } else if (strcmp(msg, "DC_STOP") == 0) {
-        if (_streamingFlag) *_streamingFlag = false;
-        Serial.println("[CAM] Streaming OFF");
+    if (strcmp(msg, "SORT_START") == 0) {
+        if (_streamingState) *_streamingState = StreamingState::STREAMING;
+        Serial.println("[CAM] Streaming ON (SORT_START)");
+    } else if (strcmp(msg, "SORT_STOP") == 0) {
+        if (_streamingState) *_streamingState = StreamingState::IDLE;
+        Serial.println("[CAM] Streaming OFF (SORT_STOP)");
     }
 }
