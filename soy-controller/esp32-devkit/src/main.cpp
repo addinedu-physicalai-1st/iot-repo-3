@@ -305,11 +305,11 @@ void setup() {
     led.begin(config::pin::LED_R, config::pin::LED_G, config::pin::LED_B);
 
     // 근접 센서 5개
-    s1.begin(config::pin::S1, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
-    s2.begin(config::pin::S2, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
-    s3.begin(config::pin::S3, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
-    s4.begin(config::pin::S4, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
-    s5.begin(config::pin::S5, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s1.begin(config::pin::SORT_POS_1L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s2.begin(config::pin::SORT_POS_2L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s3.begin(config::pin::SORT_CONFIRM_1L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s4.begin(config::pin::SORT_CONFIRM_2L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s5.begin(config::pin::SORT_CONFIRM_UNCL, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
 
     // WiFi
     wifi_manager::connect();

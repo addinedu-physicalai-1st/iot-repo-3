@@ -21,11 +21,11 @@ namespace pin {
     constexpr int SERVO_B  = 15;   // 2L 분류 서보
 
     // 근접 센서 (ADC1 전용 핀)
-    constexpr int S1       = 34;   // 분류위치 감지 / 1L (INPUT_ONLY)
-    constexpr int S2       = 35;   // 분류위치 감지 / 2L (INPUT_ONLY)
-    constexpr int S3       = 32;   // 1L 분류 확인 (통과 카운트)
-    constexpr int S4       = 33;   // 2L 분류 확인 (통과 카운트)
-    constexpr int S5       = 36;   // 미분류 확인 (말단 낙하, INPUT_ONLY)
+    constexpr int SORT_POS_1L      = 34;   // 1L 분류위치 감지 (INPUT_ONLY)
+    constexpr int SORT_POS_2L      = 35;   // 2L 분류위치 감지 (INPUT_ONLY)
+    constexpr int SORT_CONFIRM_1L  = 32;   // 1L 분류 완료 확인 (통과 카운트)
+    constexpr int SORT_CONFIRM_2L  = 33;   // 2L 분류 완료 확인 (통과 카운트)
+    constexpr int SORT_CONFIRM_UNCL= 36;   // 미분류 확인 (말단 낙하, INPUT_ONLY)
 
     // RGB LED
     constexpr int LED_R    = 25;
@@ -47,7 +47,7 @@ namespace dc {
 namespace servo {
     constexpr int INIT_DEG   =  0;    // 업로드/재연결 시 초기화 각도
     constexpr int CENTER_DEG =  0;    // 중립 (통과)
-    constexpr int SORT_DEG   = 90;    // 분류 위치
+    constexpr int SORT_DEG   = 35;    // 분류 위치
     constexpr int MIN_US     = 544;
     constexpr int MAX_US     = 2400;
 }
