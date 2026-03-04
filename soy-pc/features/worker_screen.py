@@ -10,7 +10,6 @@ from mqtt_client import mqtt_client
 MQTT_TOPIC_CONTROL = "device/control"
 MQTT_TOPIC_SENSOR = "device/sensor"
 MQTT_TOPIC_STATUS = "device/status"
-MQTT_DC_SPEED = 200  # 기본 컨베이어 속도 0~255
 
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QImage, QPixmap
@@ -714,13 +713,13 @@ def setup_worker_screen(window, stacked) -> None:
         if state in _FSM_STATES:
             _update_fsm_display(state)
 
-        # 워치독: ESP32가 IDLE인데 PC에서 공정이 돌아가고 있으면 DC_START 재전송
+        # 워치독: ESP32가 IDLE인데 PC에서 공정이 돌아가고 있으면 SORT_START 재전송
         if state == "IDLE" and _current_process_id[0] is not None:
             logger.warning(
-                "[Watchdog] ESP32 IDLE but process %s active → re-send DC_START",
+                "[Watchdog] ESP32 IDLE but process %s active → re-send SORT_START",
                 _current_process_id[0],
             )
-            mqtt_client.publish(MQTT_TOPIC_CONTROL, f"DC_START:{MQTT_DC_SPEED}")
+            mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_START")
 
     def _check_process_completion(pid: int, p: dict) -> None:
         """분류 수량이 목표에 도달했는지 확인 → 자동 공정 완료."""
@@ -735,7 +734,7 @@ def setup_worker_screen(window, stacked) -> None:
         # 목표 도달 → 공정 자동 완료
         logger.info("[공정완료] pid=%s sorted=%d/%d", pid, sorted_total, order_total)
         try:
-            mqtt_client.publish(MQTT_TOPIC_CONTROL, "DC_STOP")
+            mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_STOP")
             process_stop(int(pid))
         except Exception as e:
             logger.warning("[공정완료] stop error: %s", e)
@@ -861,8 +860,7 @@ def setup_worker_screen(window, stacked) -> None:
 
     # ── QR 디코딩 결과 처리 (분류 워크플로우) ─────────────────────
     def _on_classify_qr_decoded(data: str):
-        """ESP32-CAM QR → 품목 매칭 → SORT_DIR 명령 발행.
-        미인식/미등록은 WARNING 레벨 (공정 정지 안 함)."""
+        """ESP32-CAM QR → 품목 매칭 → UI 표시만 (분류 방향은 esp-devkit이 자체 제어)."""
         payload = _parse_qr_payload(data)
         if not payload:
             qr_status_label.setText("QR 인식: 형식 오류")
@@ -885,11 +883,9 @@ def setup_worker_screen(window, stacked) -> None:
             qr_status_label.setStyleSheet(
                 "font-size: 12px; color: #f39c12; border: none;"
             )
-            # WARNING — 공정 정지 안 함
-            mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_DIR:WARN")
             return
 
-        # 현재 주문 품목에 매칭되는지 확인
+        # 현재 주문 품목에 매칭되는지 확인 (UI 표시만, MQTT SORT_DIR 미발행)
         matched = any(
             (it.get("item_code") or "").strip().lower() == item_code.strip().lower()
             for it in order_items
@@ -898,27 +894,21 @@ def setup_worker_screen(window, stacked) -> None:
         if matched:
             code_lower = item_code.strip().lower()
             if code_lower.endswith("_1l"):
-                mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_DIR:1L")
                 qr_status_label.setText(f"QR 인식: {item_code} (1L)")
                 qr_status_label.setStyleSheet(
                     "font-size: 12px; color: #27ae60; font-weight: bold; border: none;"
                 )
             elif code_lower.endswith("_2l"):
-                mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_DIR:2L")
                 qr_status_label.setText(f"QR 인식: {item_code} (2L)")
                 qr_status_label.setStyleSheet(
                     "font-size: 12px; color: #27ae60; font-weight: bold; border: none;"
                 )
             else:
-                # 용량 판별 불가 → WARNING (공정 정지 안 함)
-                mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_DIR:WARN")
                 qr_status_label.setText(f"QR 인식: {item_code} (용량 불명)")
                 qr_status_label.setStyleSheet(
                     "font-size: 12px; color: #f39c12; border: none;"
                 )
         else:
-            # 미등록 품목 → WARNING (공정 정지 안 함)
-            mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_DIR:WARN")
             qr_status_label.setText(f"QR 인식: {item_code} (미등록)")
             qr_status_label.setStyleSheet(
                 "font-size: 12px; color: #f39c12; font-weight: bold; border: none;"
@@ -1125,7 +1115,7 @@ def setup_worker_screen(window, stacked) -> None:
             if is_running:
                 # ── 공정 중지 ──
                 process_stop(int(pid))
-                mqtt_client.publish(MQTT_TOPIC_CONTROL, "DC_STOP")
+                mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_STOP")
                 _current_process_id[0] = None
                 _current_order_items[0] = []
                 _stop_udp_camera()
@@ -1160,7 +1150,7 @@ def setup_worker_screen(window, stacked) -> None:
                     logger.warning("[공정시작] order_id 없음 (process=%s)", pid)
                     _current_order_items[0] = []
 
-                mqtt_client.publish(MQTT_TOPIC_CONTROL, f"DC_START:{MQTT_DC_SPEED}")
+                mqtt_client.publish(MQTT_TOPIC_CONTROL, "SORT_START")
                 _start_udp_camera()
                 _reset_monitor()
                 worker.classifyResultLabel.setText("공정을 시작했습니다.")

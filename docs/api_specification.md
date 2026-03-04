@@ -43,11 +43,8 @@
 
 | 기능 | 설명 | 방향 | 토픽 (Topic) | 데이터 (Payload) | 기타 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **컨베이어 시작** | DC 모터 구동 및 영상 시작 | `PC → ESP32` | `device/control` | `"DC_START"` 또는 `"DC_START:200"` | 200은 속도 값 (0~255) |
-| **컨베이어 정지** | DC 모터 정지 | `PC → ESP32` | `device/control` | `"DC_STOP"` | |
-| **분류기 1L 방향 지시** | QR로 1L 확인됨을 알림 | `PC → ESP32` | `device/control` | `"SORT_DIR:1L"` | 서보 동작을 위해 방향 큐입력 |
-| **분류기 2L 방향 지시** | QR로 2L 확인됨을 알림 | `PC → ESP32` | `device/control` | `"SORT_DIR:2L"` | |
-| **분류기 경고 지시** | 미등록 물품용 경고 표시 | `PC → ESP32` | `device/control` | `"SORT_DIR:WARN"` | 분류기 안 움직이고 LED로만 경고 |
+| **분류 시작** | DC 모터·카메라 구동 | `PC → ESP32` | `device/control` | `"SORT_START"` | DevKit: DC 구동, CAM: UDP 스트리밍 시작 |
+| **분류 종료** | DC 모터·카메라 정지 | `PC → ESP32` | `device/control` | `"SORT_STOP"` | DevKit: DC 정지, CAM: UDP 스트리밍 중지 |
 | **근접 센서 상태** | 센서 감지 상태의 변화 알림 | `ESP32 → PC` | `device/sensor` | `"PROXIMITY:1"` (감지)<br>`"PROXIMITY:0"` (미감지) | GUI 화면 표시용 업데이트 |
 | **분류 진입 알림** | 컨베이어 끝에서 물체 확인 | `ESP32 → PC` | `device/sensor` | `"DETECTED"` | 이 시점에 물체가 멈추고 분류 진행됨 |
 | **분류 완료 알림** | 물리적인 분류 처리가 끝남 | `ESP32 → PC` | `device/sensor` | `"SORTED_1L"`<br>`"SORTED_2L"`<br>`"SORTED_UNCLASSIFIED"`| PC는 이 값을 받고<br>서버로 `process_update` 요청 |

@@ -5,9 +5,9 @@
  * Fsm 클래스를 정의한다.
  *
  * FSM 다이어그램:
- *   IDLE ──DC_START──▶ RUNNING ──proximity──▶ SORTING ──완료──▶ RUNNING
- *                        │                                        ▲
- *                        └──SORT_DIR:WARN──▶ WARNING ──timeout───┘
+ *   IDLE ──SORT_START──▶ RUNNING ──proximity──▶ SORTING ──완료──▶ RUNNING
+ *                        │                                          ▲
+ *                        └──(내부) WARNING ──timeout─────────────────┘
  */
 #pragma once
 #include <Arduino.h>

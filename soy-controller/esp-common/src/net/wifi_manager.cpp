@@ -1,17 +1,20 @@
-#include "wifi_manager.h"
+#include "net/wifi_manager.h"
 #include <Arduino.h>
 #include <WiFi.h>
 
-// .env 파일에서 빌드 시 자동 주입 (env_script.py)
+// .env → env_script.py 로 빌드 시 주입
 #ifndef WIFI_SSID
-  #error "WIFI_SSID not injected. Check .env and env_script.py"
+  #error ".env file is missing or env_script.py failed to inject WIFI_SSID"
 #endif
 #ifndef WIFI_PASS
-  #error "WIFI_PASS not injected. Check .env and env_script.py"
+  #error ".env file is missing or env_script.py failed to inject WIFI_PASS"
 #endif
 
 void wifi_manager::connect() {
+    WiFi.mode(WIFI_STA);  // TCP/IP 스택 초기화 (lwIP mbox 준비)
     WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.setSleep(false);
+
     Serial.print("[WiFi] connecting");
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
