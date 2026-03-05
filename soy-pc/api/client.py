@@ -342,6 +342,16 @@ def list_inventory() -> list[dict]:
     return res if isinstance(res, list) else []
 
 
+def list_inventory_status_stats() -> list[dict]:
+    """재고 현황 통계: brand × category × inventory_id 별 건수 (관리자 로그인 필요)."""
+    ok, res, err = _request("list_inventory_status_stats", {})
+    if not ok:
+        raise RuntimeError(err or "list_inventory_status_stats failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
 def list_item_sorting_logs(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -451,6 +461,16 @@ def order_mark_delivered(
     ok, res, err = _request("order_mark_delivered", body)
     if not ok:
         raise RuntimeError(err or "입고 처리 실패")
+    return res or {}
+
+
+def order_set_status(order_id: int, status: str) -> dict:
+    """주문 상태를 PENDING/DELIVERED로 변경."""
+    ok, res, err = _request(
+        "order_set_status", {"order_id": int(order_id), "status": str(status).upper()}
+    )
+    if not ok:
+        raise RuntimeError(err or "주문 상태 변경 실패")
     return res or {}
 
 

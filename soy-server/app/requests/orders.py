@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def handle(action: str, body: dict[str, Any]) -> Result | None:
-    """list_orders, get_order, get_order_id_by_order_item_id, order_mark_delivered."""
+    """list_orders, get_order, get_order_id_by_order_item_id, order_mark_delivered, order_set_status."""
     if action == "list_orders":
         orders_list = orders_module.list_orders()
         return (True, orders_list, "")
@@ -50,4 +50,21 @@ def handle(action: str, body: dict[str, Any]) -> Result | None:
         if err:
             return (False, None, err)
         return (True, {"order_id": oid, "process_id": process_id}, "")
+    if action == "order_set_status":
+        oid = body.get("order_id")
+        status = body.get("status")
+        if oid is None:
+            return (False, None, "order_id required")
+        if status is None:
+            return (False, None, "status required")
+        try:
+            out = orders_module.set_order_status(int(oid), str(status))
+            return (True, out, "")
+        except orders_module.OrderNotFound:
+            return (False, None, "주문을 찾을 수 없습니다.")
+        except ValueError as e:
+            return (False, None, str(e))
+        except Exception as e:
+            logger.warning("order_set_status 실패 order_id=%s status=%s: %s", oid, status, e)
+            return (False, None, f"주문 상태 변경 실패: {e}")
     return None

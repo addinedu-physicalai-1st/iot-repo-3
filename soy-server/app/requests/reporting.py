@@ -8,7 +8,9 @@ Result = tuple[bool, Any, str]
 
 
 def handle(action: str, body: dict[str, Any]) -> Result | None:
-    """list_inventory."""
+    """list_inventory, list_inventory_status_stats."""
     if action == "list_inventory":
         return (True, inventory_module.list_inventory(), "")
+    if action == "list_inventory_status_stats":
+        return (True, inventory_module.list_inventory_status_stats(), "")
     return None

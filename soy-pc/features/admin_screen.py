@@ -17,8 +17,13 @@ from api import (
     get_first_admin_id,
     list_access_logs,
     list_inventory,
+    list_inventory_status_stats,
     list_item_sorting_logs,
+    list_orders,
+    list_processes,
     list_workers,
+    order_mark_delivered,
+    order_set_status,
     update_worker as api_update_worker,
 )
 from PyQt6.QtWidgets import QFileDialog
@@ -26,6 +31,9 @@ from PyQt6.QtWidgets import QFileDialog
 from api.client import admin_logout, set_card_read_callback
 from serial_rfid import SerialRFIDReader, get_register_serial_port
 from widgets.donut_chart import DonutChartWidget
+from widgets.expiration_stats_widget import ExpirationStatsWidget
+from widgets.inventory_status_chart import InventoryStatusChartWidget
+from widgets.work_status_board_widget import WorkStatusBoardWidget
 
 _USE_SERVER_RFID = os.environ.get("SOY_USE_SERVER_RFID", "1").strip().lower() not in ("0", "false", "no")
 
@@ -144,6 +152,22 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     layout = QVBoxLayout(admin.inventoryChartContainer)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(inventory_chart)
+
+    # 재고 현황: 아크+막대 차트 위젯
+    inventory_status_chart = InventoryStatusChartWidget(admin.inventoryStatusChartContainer)
+    status_layout = QVBoxLayout(admin.inventoryStatusChartContainer)
+    status_layout.setContentsMargins(0, 0, 0, 0)
+    status_layout.addWidget(inventory_status_chart)
+
+    # 유통기한 통계 위젯
+    expiration_stats = ExpirationStatsWidget(admin.expirationStatsContainer)
+    exp_layout = QVBoxLayout(admin.expirationStatsContainer)
+    exp_layout.setContentsMargins(0, 0, 0, 0)
+    exp_layout.addWidget(expiration_stats)
+    work_status_board = WorkStatusBoardWidget(admin.workStatusContainer)
+    ws_layout = QVBoxLayout(admin.workStatusContainer)
+    ws_layout.setContentsMargins(0, 0, 0, 0)
+    ws_layout.addWidget(work_status_board)
 
     from PyQt6.QtCore import QDate
     admin.startDateEdit.setDate(QDate.currentDate().addDays(-7))
@@ -277,6 +301,72 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         data = [(e.get("inventory_name", ""), e.get("current_qty", 0) or 0) for e in inv]
         inventory_chart.set_data(data)
 
+    def refresh_inventory_status():
+        stats: list[dict] = []
+        try:
+            stats = list_inventory_status_stats()
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            pass
+        if not stats:
+            from db.inventory import list_inventory_status_stats as db_list_stats
+            stats = db_list_stats()
+        inventory_status_chart.set_data(stats)
+        inventory_status_chart.set_split_by_category(
+            bool(admin.toggleInventoryStatusSplitButton.isChecked())
+        )
+
+    def refresh_expiration_stats():
+        logs: list[dict] = []
+        try:
+            logs = list_item_sorting_logs()
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            pass
+        expiration_stats.set_logs(logs)
+
+    def refresh_work_status():
+        orders: list[dict] = []
+        processes: list[dict] = []
+        logs: list[dict] = []
+        try:
+            orders = list_orders()
+            processes = list_processes()
+            logs = list_item_sorting_logs()
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            pass
+        work_status_board.set_source_data(orders, processes, logs)
+
+    def on_work_status_drop(order_id: int, from_status: str, to_status: str) -> bool:
+        # 현재는 PENDING <-> DELIVERED 이동만 DB 반영
+        if {from_status, to_status} != {"PENDING", "DELIVERED"}:
+            refresh_work_status()
+            return False
+        try:
+            if to_status == "DELIVERED":
+                # 구버전 서버 호환: 기존 액션으로 delivered 처리
+                order_mark_delivered(order_id=order_id)
+            else:
+                try:
+                    order_set_status(order_id, to_status)
+                except (TimeoutError, RuntimeError, OSError, ConnectionError) as e:
+                    # 구버전 서버(Unknown action)일 때 PC 로컬 DB fallback
+                    msg = str(e)
+                    if "Unknown action: order_set_status" not in msg:
+                        raise
+                    from db.orders import set_order_status_pending
+
+                    set_order_status_pending(order_id)
+            return True
+        except (TimeoutError, RuntimeError, OSError, ConnectionError) as e:
+            box = MessageBox("상태 변경 실패", f"주문 #{order_id} 상태 변경 실패:\n{e!s}", window)
+            box.cancelButton.hide()
+            box.yesButton.setText("확인")
+            box.exec()
+            return False
+        finally:
+            refresh_work_status()
+
+    work_status_board.set_status_change_handler(on_work_status_drop)
+
     def on_current_changed(index: int):
         if stacked.widget(index) == admin:
             current_idx = admin.admin_content_stack.currentIndex()
@@ -286,6 +376,12 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                 refresh_item_sorting_logs()
             elif current_idx == 3:
                 refresh_inventory_report()
+            elif current_idx == 4:
+                refresh_inventory_status()
+            elif current_idx == 5:
+                refresh_expiration_stats()
+            elif current_idx == 6:
+                refresh_work_status()
             else:
                 refresh_workers()
 
@@ -300,6 +396,12 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
             refresh_item_sorting_logs()
         elif idx == 3:
             refresh_inventory_report()
+        elif idx == 4:
+            refresh_inventory_status()
+        elif idx == 5:
+            refresh_expiration_stats()
+        elif idx == 6:
+            refresh_work_status()
         else:
             refresh_workers()
 
@@ -309,7 +411,9 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         admin.menu_worker_management.setChecked(True)
         admin.menu_access_log.setChecked(False)
         admin.menu_item_sorting_log.setChecked(False)
-        admin.menu_inventory_report.setChecked(False)
+        admin.menu_inventory_status.setChecked(False)
+        admin.menu_expiration_stats.setChecked(False)
+        admin.menu_work_status.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(0)
         refresh_workers()
 
@@ -317,7 +421,9 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         admin.menu_worker_management.setChecked(False)
         admin.menu_access_log.setChecked(True)
         admin.menu_item_sorting_log.setChecked(False)
-        admin.menu_inventory_report.setChecked(False)
+        admin.menu_inventory_status.setChecked(False)
+        admin.menu_expiration_stats.setChecked(False)
+        admin.menu_work_status.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(1)
         refresh_access_logs()
 
@@ -325,23 +431,60 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         admin.menu_worker_management.setChecked(False)
         admin.menu_access_log.setChecked(False)
         admin.menu_item_sorting_log.setChecked(True)
-        admin.menu_inventory_report.setChecked(False)
+        admin.menu_inventory_status.setChecked(False)
+        admin.menu_expiration_stats.setChecked(False)
+        admin.menu_work_status.setChecked(False)
         admin.admin_content_stack.setCurrentIndex(2)
         refresh_item_sorting_logs()
 
-    def show_inventory_report():
+    def show_inventory_status():
         admin.menu_worker_management.setChecked(False)
         admin.menu_access_log.setChecked(False)
         admin.menu_item_sorting_log.setChecked(False)
-        admin.menu_inventory_report.setChecked(True)
-        admin.admin_content_stack.setCurrentIndex(3)
-        refresh_inventory_report()
+        admin.menu_inventory_status.setChecked(True)
+        admin.menu_expiration_stats.setChecked(False)
+        admin.menu_work_status.setChecked(False)
+        admin.admin_content_stack.setCurrentIndex(4)
+        refresh_inventory_status()
+
+    def show_expiration_stats():
+        admin.menu_worker_management.setChecked(False)
+        admin.menu_access_log.setChecked(False)
+        admin.menu_item_sorting_log.setChecked(False)
+        admin.menu_inventory_status.setChecked(False)
+        admin.menu_expiration_stats.setChecked(True)
+        admin.menu_work_status.setChecked(False)
+        admin.admin_content_stack.setCurrentIndex(5)
+        refresh_expiration_stats()
+
+    def show_work_status():
+        admin.menu_worker_management.setChecked(False)
+        admin.menu_access_log.setChecked(False)
+        admin.menu_item_sorting_log.setChecked(False)
+        admin.menu_inventory_status.setChecked(False)
+        admin.menu_expiration_stats.setChecked(False)
+        admin.menu_work_status.setChecked(True)
+        admin.admin_content_stack.setCurrentIndex(6)
+        refresh_work_status()
 
     admin.menu_worker_management.clicked.connect(show_worker_management)
     admin.menu_access_log.clicked.connect(show_access_log)
     admin.menu_item_sorting_log.clicked.connect(show_item_sorting_log)
-    admin.menu_inventory_report.clicked.connect(show_inventory_report)
+    admin.menu_inventory_status.clicked.connect(show_inventory_status)
+    admin.menu_expiration_stats.clicked.connect(show_expiration_stats)
+    admin.menu_work_status.clicked.connect(show_work_status)
     admin.refreshInventoryButton.clicked.connect(refresh_inventory_report)
+    admin.refreshInventoryStatusButton.clicked.connect(refresh_inventory_status)
+    admin.refreshExpirationStatsButton.clicked.connect(refresh_expiration_stats)
+    admin.refreshWorkStatusButton.clicked.connect(refresh_work_status)
+    admin.toggleInventoryStatusSplitButton.toggled.connect(
+        lambda checked: (
+            inventory_status_chart.set_split_by_category(bool(checked)),
+            admin.toggleInventoryStatusSplitButton.setText(
+                "합산 보기" if checked else "진/국 분리 보기"
+            ),
+        )
+    )
 
     def export_inventory_to_pdf():
         import tempfile
@@ -383,7 +526,99 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                 except Exception:
                     pass
 
+    def export_inventory_status_to_pdf():
+        from PyQt6.QtCore import QMarginsF, QRect, Qt
+        from PyQt6.QtGui import QPainter, QPageLayout, QPageSize, QPdfWriter, QColor, QPen
+
+        path, _ = QFileDialog.getSaveFileName(
+            window,
+            "PDF 저장",
+            f"재고현황_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            "PDF 파일 (*.pdf)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+
+        try:
+            # PDF에는 합산/분리 두 화면을 함께 담는다.
+            current_split = bool(admin.toggleInventoryStatusSplitButton.isChecked())
+            inventory_status_chart.set_split_by_category(False)
+            agg_pixmap = inventory_status_chart.grab()
+            inventory_status_chart.set_split_by_category(True)
+            split_pixmap = inventory_status_chart.grab()
+            inventory_status_chart.set_split_by_category(current_split)
+
+            if agg_pixmap.isNull() or split_pixmap.isNull():
+                raise RuntimeError("차트를 캡처할 수 없습니다.")
+
+            # 캡처 이미지 주변 불필요 여백을 잘라내어 PDF 비율을 안정화
+            def trim_chart(pm):
+                w, h = pm.width(), pm.height()
+                # 좌측 정보(몽고 라벨 등)가 잘리지 않도록 left crop은 작게 유지
+                l = int(w * 0.025)
+                r = int(w * 0.035)
+                t = int(h * 0.04)
+                b = int(h * 0.06)
+                return pm.copy(l, t, max(1, w - l - r), max(1, h - t - b))
+
+            agg_chart = trim_chart(agg_pixmap)
+            split_chart = trim_chart(split_pixmap)
+
+            pdf = QPdfWriter(path)
+            pdf.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+            pdf.setResolution(300)
+            pdf.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout.Unit.Millimeter)
+
+            painter = QPainter(pdf)
+            page_rect = pdf.pageLayout().paintRectPixels(pdf.resolution())
+            painter.fillRect(page_rect, QColor("#ffffff"))
+
+            # 페이지를 상/하 2개 카드로 나눠 비율 맞춰 배치
+            outer_pad = 16
+            section_gap = 16
+            section_w = page_rect.width() - (outer_pad * 2)
+            section_h = (page_rect.height() - (outer_pad * 2) - section_gap) // 2
+
+            def draw_section(y_top: int, chart_pm) -> None:
+                sec = QRect(page_rect.x() + outer_pad, y_top, section_w, section_h)
+                painter.fillRect(sec, QColor("#f6f6f4"))
+                painter.setPen(QPen(QColor("#d9d9d6"), 1))
+                painter.drawRect(sec)
+
+                # 차트 영역
+                chart_area = QRect(sec.x() + 8, sec.y() + 8, sec.width() - 16, sec.height() - 16)
+                src_w, src_h = chart_pm.width(), chart_pm.height()
+                if src_w <= 0 or src_h <= 0:
+                    return
+                scale = min(chart_area.width() / src_w, chart_area.height() / src_h)
+                draw_w = max(1, int(src_w * scale))
+                draw_h = max(1, int(src_h * scale))
+                # 캡처 이미지 내부 여백 비대칭으로 약간 우측 치우쳐 보이는 현상 보정
+                center_bias_px = 10
+                dx = chart_area.x() + (chart_area.width() - draw_w) // 2 - center_bias_px
+                dy = chart_area.y() + (chart_area.height() - draw_h) // 2
+                painter.drawPixmap(dx, dy, draw_w, draw_h, chart_pm)
+
+            first_y = page_rect.y() + outer_pad
+            second_y = first_y + section_h + section_gap
+            draw_section(first_y, agg_chart)
+            draw_section(second_y, split_chart)
+            painter.end()
+
+            box = MessageBox("저장 완료", f"PDF가 저장되었습니다.\n{path}", window)
+            box.cancelButton.hide()
+            box.yesButton.setText("확인")
+            box.exec()
+        except Exception as e:
+            box = MessageBox("PDF 저장 실패", str(e), window)
+            box.cancelButton.hide()
+            box.yesButton.setText("확인")
+            box.exec()
+
     admin.exportInventoryPdfButton.clicked.connect(export_inventory_to_pdf)
+    admin.exportInventoryStatusPdfButton.clicked.connect(export_inventory_status_to_pdf)
     admin.refreshAccessLogButton.clicked.connect(refresh_access_logs)
     admin.itemSortingLogSearchButton.clicked.connect(refresh_item_sorting_logs)
     admin.itemSearchEdit.returnPressed.connect(refresh_item_sorting_logs)

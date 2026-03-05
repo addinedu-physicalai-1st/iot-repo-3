@@ -45,6 +45,9 @@ def handle_no_auth(
 def handle_admin_only(action: str, body: dict[str, Any]) -> Result:
     """admin 인증 후에만 호출. Worker CRUD 및 관리자 전용 조회 액션."""
     logger.info("admin 인증 후에만 호출. Worker CRUD 등.")
+    res = _orders.handle(action, body)
+    if res is not None:
+        return res
     res = _workers.handle(action, body)
     if res is not None:
         return res
