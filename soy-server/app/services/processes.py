@@ -91,6 +91,7 @@ def list_item_sorting_logs(
                 {
                     "log_id": log.log_id,
                     "process_id": log.process_id,
+                    "item_code": log.item_code,
                     "product_name": p_name or log.item_code or "알 수 없음",
                     "box_qr_code": log.box_qr_code,
                     "is_error": bool(log.is_error),

@@ -18,6 +18,31 @@ class OrderNotFound(Exception):
     pass
 
 
+def set_order_status(order_id: int, status: str, engine: Engine | None = None) -> dict:
+    """
+    주문 상태를 PENDING/DELIVERED로 변경.
+    - PENDING -> DELIVERED: process 1건 생성(기존 delivered 처리 로직 재사용)
+    - DELIVERED -> PENDING: 상태만 되돌림
+    """
+    target = (status or "").strip().upper()
+    if target not in ("PENDING", "DELIVERED"):
+        raise ValueError("status must be PENDING or DELIVERED")
+
+    if target == "DELIVERED":
+        err, process_id = set_order_delivered_and_create_process(order_id, engine=engine)
+        if err:
+            raise ValueError(err)
+        return {"order_id": order_id, "status": "DELIVERED", "process_id": process_id}
+
+    with get_session() as session:
+        order = session.get(Order, order_id)
+        if not order:
+            raise OrderNotFound()
+        order.status = "PENDING"
+        session.flush()
+    return {"order_id": order_id, "status": "PENDING"}
+
+
 def get_order(order_id: int, engine: Engine | None = None) -> dict | None:
     """order_id로 주문 조회. 없으면 None."""
     with get_session() as session:

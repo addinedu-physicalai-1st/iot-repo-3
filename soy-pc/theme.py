@@ -351,7 +351,12 @@ QWidget#AdminScreen QFrame#admin_sidebar QLabel#label_menuTitle {{
   padding: 12px 0 8px 0;
 }}
 QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management,
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log {{
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_item_sorting_log,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_report,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_status,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_expiration_stats,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_work_status {{
   background-color: transparent;
   color: {TEXT_PRIMARY};
   border: none;
@@ -363,11 +368,21 @@ QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log {{
   margin-bottom: 4px;
 }}
 QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:hover,
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:hover {{
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_item_sorting_log:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_report:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_status:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_expiration_stats:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_work_status:hover {{
   background-color: {BG_BUTTON};
 }}
 QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:checked,
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:checked {{
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_item_sorting_log:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_report:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_status:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_expiration_stats:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_work_status:checked {{
   background-color: {ACCENT_SOFT};
   color: {ACCENT_HOVER};
   font-weight: 600;

@@ -117,6 +117,69 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="menu_inventory_status">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>44</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>16</pointsize>
+         </font>
+        </property>
+        <property name="text">
+         <string>재고 현황</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="menu_work_status">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>44</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>16</pointsize>
+         </font>
+        </property>
+        <property name="text">
+         <string>작업 현황</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="menu_expiration_stats">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>44</height>
+         </size>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>16</pointsize>
+         </font>
+        </property>
+        <property name="text">
+         <string>유통기한 통계</string>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="verticalSpacer_sidebar">
         <property name="orientation">
          <enum>Qt::Orientation::Vertical</enum>
@@ -254,8 +317,8 @@
            </property>
            <property name="minimumSize">
             <size>
-             <width>200</width>
-             <height>36</height>
+             <width>320</width>
+             <height>40</height>
             </size>
            </property>
           </widget>
@@ -519,6 +582,264 @@
          <attribute name="horizontalHeaderStretchLastSection">
           <bool>true</bool>
          </attribute>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_inventory_report">
+      <property name="objectName">
+       <string>page_inventory_report</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_inventory_report">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_inventory_report_header">
+         <item>
+          <widget class="QLabel" name="label_inventory_report_title">
+           <property name="font">
+            <font>
+             <pointsize>18</pointsize>
+             <weight>75</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="text">
+            <string>창고별 재고 비율</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_inventory_header">
+           <property name="orientation">
+            <enum>Qt::Orientation::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="exportInventoryPdfButton">
+           <property name="minimumSize">
+            <size>
+             <width>0</width>
+             <height>36</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>PDF 출력</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QWidget" name="inventoryChartContainer" native="true">
+         <property name="objectName">
+          <string>inventoryChartContainer</string>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>400</width>
+           <height>320</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="refreshInventoryButton">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>13</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>새로고침</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_inventory_status">
+      <property name="objectName">
+       <string>page_inventory_status</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_inventory_status">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_inventory_status_header">
+        <item>
+         <spacer name="horizontalSpacer_inventory_status_header">
+          <property name="orientation">
+           <enum>Qt::Orientation::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="toggleInventoryStatusSplitButton">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>40</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <pointsize>13</pointsize>
+           </font>
+          </property>
+          <property name="text">
+           <string>진/국 분리 보기</string>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="exportInventoryStatusPdfButton">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>40</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <pointsize>13</pointsize>
+           </font>
+          </property>
+          <property name="text">
+           <string>PDF 출력</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+       <item>
+        <widget class="QWidget" name="inventoryStatusChartContainer" native="true">
+         <property name="objectName">
+          <string>inventoryStatusChartContainer</string>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>900</width>
+           <height>860</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="refreshInventoryStatusButton">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>13</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>새로고침</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_expiration_stats">
+      <property name="objectName">
+       <string>page_expiration_stats</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_expiration_stats">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QWidget" name="expirationStatsContainer" native="true">
+         <property name="minimumSize">
+          <size>
+           <width>900</width>
+           <height>520</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="refreshExpirationStatsButton">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>13</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>새로고침</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_work_status">
+      <property name="objectName">
+       <string>page_work_status</string>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_work_status">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QWidget" name="workStatusContainer" native="true">
+         <property name="minimumSize">
+          <size>
+           <width>900</width>
+           <height>520</height>
+          </size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="refreshWorkStatusButton">
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>40</height>
+          </size>
+         </property>
+         <property name="font">
+          <font>
+           <pointsize>13</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>새로고침</string>
+         </property>
         </widget>
        </item>
       </layout>
