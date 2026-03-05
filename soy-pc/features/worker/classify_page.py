@@ -1,4 +1,4 @@
-"""분류하기 페이지 — 모니터 프레임, 공정 테이블, 창고 차트, 공정 시작/중지."""
+"""분류하기 페이지 — HMI 스타일 모니터, 공정 테이블, 창고 차트, 공정 시작/중지."""
 
 import logging
 from typing import Any
@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QVBoxLayout,
     QTableWidgetItem,
 )
@@ -23,17 +24,29 @@ from features.worker.process_controller import (
 
 logger = logging.getLogger(__name__)
 
-# ── FSM 상태 색상 ─────────────────────────────────────────────
-_FSM_COLORS = {
+# ── 공정 상태 색상 ────────────────────────────────────────────
+_STATE_COLORS = {
     "IDLE": "#e74c3c",
     "RUNNING": "#27ae60",
-    "SORTING": "#3498db",
-    "WARNING": "#f39c12",
     "PAUSED": "#f39c12",
 }
-_FSM_INACTIVE = "#e0e0e0"
-_FSM_STATES = ["IDLE", "RUNNING", "SORTING", "WARNING", "PAUSED"]
-_FSM_LABELS = {"IDLE": "대기", "RUNNING": "가동", "SORTING": "분류", "WARNING": "경고", "PAUSED": "일시정지"}
+_STATE_LABELS = {
+    "IDLE": "대기",
+    "RUNNING": "가동중",
+    "PAUSED": "일시정지",
+}
+
+# ── 분류대 스타일 ─────────────────────────────────────────────
+_STATION_IDLE_STYLE = (
+    "QFrame { background: #f5f5f5; border: 2px solid #ddd; border-radius: 8px; }"
+)
+_STATION_ACTIVE_STYLE = (
+    "QFrame { background: #e8f4fd; border: 2px solid #3498db; border-radius: 8px; }"
+)
+_STATION_DOT_IDLE = "color: #aaa; font-size: 16px; border: none;"
+_STATION_DOT_ACTIVE = "color: #3498db; font-size: 16px; font-weight: bold; border: none;"
+_STATION_LABEL_IDLE = "color: #888; font-size: 12px; border: none;"
+_STATION_LABEL_ACTIVE = "color: #3498db; font-size: 12px; font-weight: bold; border: none;"
 
 WAREHOUSE_TOTAL = 10  # 창고 현황 총량 기준
 
@@ -64,46 +77,87 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     )
     monitor_layout.addWidget(cam_preview)
 
-    # 우측: FSM + QR + 근접센서 상태
+    # 우측: HMI 스타일 공정 상태
     info_layout = QVBoxLayout()
     info_layout.setSpacing(8)
 
-    fsm_title = QLabel("공정 단계")
-    fsm_title.setStyleSheet("font-weight: bold; font-size: 13px; border: none;")
-    info_layout.addWidget(fsm_title)
+    # ── 공정 상태 표시 ────────────────────────────────────────
+    process_state_label = QLabel()
+    process_state_label.setStyleSheet(
+        "font-weight: bold; font-size: 14px; border: none;"
+    )
+    info_layout.addWidget(process_state_label)
 
-    fsm_row = QHBoxLayout()
-    fsm_row.setSpacing(4)
-    fsm_state_labels: dict[str, QLabel] = {}
-    for i, st in enumerate(_FSM_STATES):
-        lbl = QLabel(_FSM_LABELS[st])
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl.setFixedHeight(28)
-        lbl.setMinimumWidth(52)
-        lbl.setStyleSheet(
-            f"background: {_FSM_INACTIVE}; color: #666; border-radius: 4px; "
-            f"font-size: 12px; padding: 2px 8px; border: none;"
-        )
-        fsm_state_labels[st] = lbl
-        fsm_row.addWidget(lbl)
-        if i < len(_FSM_STATES) - 1:
-            arrow = QLabel("->")
-            arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            arrow.setFixedWidth(20)
-            arrow.setStyleSheet("color: #999; font-size: 11px; border: none;")
-            fsm_row.addWidget(arrow)
-    fsm_row.addStretch()
-    info_layout.addLayout(fsm_row)
+    # ── 분류대 패널 (1L / 2L) ─────────────────────────────────
+    stations_row = QHBoxLayout()
+    stations_row.setSpacing(12)
 
-    qr_status_label = QLabel("QR 인식: 대기 중")
-    qr_status_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
-    qr_status_label.setWordWrap(True)
-    info_layout.addWidget(qr_status_label)
+    # 1L 분류대
+    station_1l_frame = QFrame()
+    station_1l_frame.setFixedSize(130, 70)
+    station_1l_frame.setStyleSheet(_STATION_IDLE_STYLE)
+    station_1l_layout = QVBoxLayout(station_1l_frame)
+    station_1l_layout.setContentsMargins(8, 6, 8, 6)
+    station_1l_layout.setSpacing(2)
+    station_1l_title = QLabel("분류대 1L")
+    station_1l_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    station_1l_title.setStyleSheet(
+        "font-weight: bold; font-size: 12px; color: #555; border: none;"
+    )
+    station_1l_status = QLabel("\u25cf 대기")
+    station_1l_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    station_1l_status.setStyleSheet(_STATION_DOT_IDLE)
+    station_1l_layout.addWidget(station_1l_title)
+    station_1l_layout.addWidget(station_1l_status)
 
-    proximity_label = QLabel("근접센서: 감지 되지 않음")
-    proximity_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
-    info_layout.addWidget(proximity_label)
+    # 2L 분류대
+    station_2l_frame = QFrame()
+    station_2l_frame.setFixedSize(130, 70)
+    station_2l_frame.setStyleSheet(_STATION_IDLE_STYLE)
+    station_2l_layout = QVBoxLayout(station_2l_frame)
+    station_2l_layout.setContentsMargins(8, 6, 8, 6)
+    station_2l_layout.setSpacing(2)
+    station_2l_title = QLabel("분류대 2L")
+    station_2l_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    station_2l_title.setStyleSheet(
+        "font-weight: bold; font-size: 12px; color: #555; border: none;"
+    )
+    station_2l_status = QLabel("\u25cf 대기")
+    station_2l_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    station_2l_status.setStyleSheet(_STATION_DOT_IDLE)
+    station_2l_layout.addWidget(station_2l_title)
+    station_2l_layout.addWidget(station_2l_status)
 
+    stations_row.addWidget(station_1l_frame)
+    stations_row.addWidget(station_2l_frame)
+    stations_row.addStretch()
+    info_layout.addLayout(stations_row)
+
+    # ── 컨베이어 흐름 표시 ─────────────────────────────────────
+    flow_label = QLabel("\u25b6QR \u2550\u2550\u25b6 S1 \u2550\u2550\u25b6 S2 \u2550\u2550\u25b6 \ubbf8\ubd84\ub958")
+    flow_label.setStyleSheet(
+        "font-size: 12px; color: #777; font-family: monospace; border: none;"
+    )
+    info_layout.addWidget(flow_label)
+
+    # ── 대기 목록 ──────────────────────────────────────────────
+    pending_title = QLabel("대기 목록:")
+    pending_title.setStyleSheet(
+        "font-weight: bold; font-size: 12px; color: #555; border: none;"
+    )
+    info_layout.addWidget(pending_title)
+
+    pending_list = QListWidget()
+    pending_list.setMaximumHeight(80)
+    pending_list.setStyleSheet(
+        "QListWidget { background: #fff; border: 1px solid #ddd; border-radius: 4px; "
+        "font-size: 12px; } "
+        "QListWidget::item { padding: 2px 6px; }"
+    )
+    pending_list.addItem("(비어있음)")
+    info_layout.addWidget(pending_list)
+
+    # ── 경고 라벨 ──────────────────────────────────────────────
     warning_label = QLabel("경고: (없음)")
     warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
     warning_label.setWordWrap(True)
@@ -116,46 +170,50 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
 
     classify_layout.insertWidget(1, monitor_frame)
 
-    # ── FSM 상태 UI 업데이트 ──────────────────────────────────────
-    def _update_fsm_display(active_state: str):
-        for st, lbl in fsm_state_labels.items():
-            if st == active_state:
-                color = _FSM_COLORS.get(st, _FSM_INACTIVE)
-                lbl.setStyleSheet(
-                    f"background: {color}; color: white; border-radius: 4px; "
-                    f"font-size: 12px; font-weight: bold; padding: 2px 8px; border: none;"
-                )
-            else:
-                lbl.setStyleSheet(
-                    f"background: {_FSM_INACTIVE}; color: #666; border-radius: 4px; "
-                    f"font-size: 12px; padding: 2px 8px; border: none;"
-                )
+    # ── HMI 상태 업데이트 헬퍼 ─────────────────────────────────
+    def _update_process_state(state_name: str):
+        color = _STATE_COLORS.get(state_name, "#888")
+        label = _STATE_LABELS.get(state_name, state_name)
+        process_state_label.setText(f"\u25a0 {label}")
+        process_state_label.setStyleSheet(
+            f"font-weight: bold; font-size: 14px; color: {color}; border: none;"
+        )
 
-    _update_fsm_display("IDLE")
+    def _update_station(station: str, active: bool):
+        if station == "1L":
+            frame, status_lbl = station_1l_frame, station_1l_status
+        else:
+            frame, status_lbl = station_2l_frame, station_2l_status
+        if active:
+            frame.setStyleSheet(_STATION_ACTIVE_STYLE)
+            status_lbl.setText("\u25cf \ubd84\ub958\uc911")
+            status_lbl.setStyleSheet(_STATION_DOT_ACTIVE)
+        else:
+            frame.setStyleSheet(_STATION_IDLE_STYLE)
+            status_lbl.setText("\u25cf \ub300\uae30")
+            status_lbl.setStyleSheet(_STATION_DOT_IDLE)
+
+    def _update_pending_list(items: list[tuple[str, str]]):
+        pending_list.clear()
+        if not items:
+            pending_list.addItem("(\ube44\uc5b4\uc788\uc74c)")
+        else:
+            for item_code, direction in items:
+                pending_list.addItem(f"{item_code}  \u2192  {direction}")
+
+    _update_process_state("IDLE")
 
     # ── ProcessController + UI 콜백 ──────────────────────────────
     class _UiCallbacks:
         def on_fsm_state_changed(self, state: FsmState) -> None:
-            _update_fsm_display(state.value)
+            _update_process_state(state.value)
             _update_buttons(state.value)
 
         def on_proximity(self, detected: bool) -> None:
-            if detected:
-                proximity_label.setText("근접센서: 물체감지(동작)!")
-                proximity_label.setStyleSheet(
-                    "font-size: 12px; color: #27ae60; font-weight: bold; border: none;"
-                )
-            else:
-                proximity_label.setText("근접센서: 감지 되지 않음")
-                proximity_label.setStyleSheet(
-                    "font-size: 12px; color: #8a8a8a; border: none;"
-                )
+            pass
 
         def on_detected(self, direction: str, queue_size: int) -> None:
-            proximity_label.setText("근접센서: 분류위치 감지!")
-            proximity_label.setStyleSheet(
-                "font-size: 12px; color: #3498db; font-weight: bold; border: none;"
-            )
+            pass
 
         def on_sort_result(self, kind: str, new_qty: int, db_ok: bool) -> None:
             suffix = "" if db_ok else " (DB 오류)"
@@ -204,27 +262,25 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         def on_qr_enqueued(
             self, item_code: str, direction: str, queue_size: int
         ) -> None:
-            if direction in ("1L", "2L"):
-                qr_status_label.setText(
-                    f"QR 인식: {item_code} → {direction} 예약 (큐: {queue_size})"
-                )
-                qr_status_label.setStyleSheet(
-                    "font-size: 12px; color: #27ae60; font-weight: bold; border: none;"
-                )
-            else:
-                qr_status_label.setText(f"QR 인식: {item_code} → WARN 예약")
-                qr_status_label.setStyleSheet(
-                    "font-size: 12px; color: #f39c12; border: none;"
-                )
+            pass  # pending_updated로 대체
 
         def on_qr_error(self, message: str) -> None:
-            qr_status_label.setText(f"QR 인식: {message}")
-            qr_status_label.setStyleSheet(
+            warning_label.setText(f"경고: {message}")
+            warning_label.setStyleSheet(
                 "font-size: 12px; color: #f39c12; border: none;"
             )
 
         def on_error(self, message: str) -> None:
             worker.classifyResultLabel.setText(message)
+
+        def on_sorting_started(self, station: str) -> None:
+            _update_station(station, True)
+
+        def on_sorting_ended(self, station: str) -> None:
+            _update_station(station, False)
+
+        def on_pending_updated(self, items: list[tuple[str, str]]) -> None:
+            _update_pending_list(items)
 
     _controller = ProcessController(_UiCallbacks())
 
@@ -234,6 +290,15 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     mqtt_bridge.sensor_received.connect(
         lambda p: _controller.handle_sensor(p, _classify_processes)
     )
+
+    def _on_camera_detect_reset(payload: str):
+        """CAMERA_DETECT 수신 시 UdpCameraThread 쿨다운 초기화."""
+        if payload == "CAMERA_DETECT":
+            thread = _udp_cam_thread[0]
+            if thread:
+                thread.reset_cooldown()
+
+    mqtt_bridge.sensor_received.connect(_on_camera_detect_reset)
 
     # ── UDP 카메라 ───────────────────────────────────────────────
     _udp_cam_thread: list[UdpCameraThread | None] = [None]
@@ -274,8 +339,8 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     def _on_classify_qr_decoded(data: str):
         payload = parse_qr_payload(data)
         if not payload:
-            qr_status_label.setText("QR 인식: 형식 오류")
-            qr_status_label.setStyleSheet(
+            warning_label.setText("경고: QR 인식 형식 오류")
+            warning_label.setStyleSheet(
                 "font-size: 12px; color: #f39c12; border: none;"
             )
             logger.warning("[QR] 파싱 실패: %s", data)
@@ -285,11 +350,10 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
 
     # ── 모니터 초기화 ────────────────────────────────────────────
     def _reset_monitor():
-        _update_fsm_display("IDLE")
-        qr_status_label.setText("QR 인식: 대기 중")
-        qr_status_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
-        proximity_label.setText("근접센서: 감지 되지 않음")
-        proximity_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
+        _update_process_state("IDLE")
+        _update_station("1L", False)
+        _update_station("2L", False)
+        _update_pending_list([])
         warning_label.setText("경고: (없음)")
         warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
 
@@ -343,7 +407,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
 
                 def _fmt_dt(s: str | None) -> str:
                     if not s:
-                        return "—"
+                        return "\u2014"
                     return s.replace("T", " ")[:16]
 
                 start_str = _fmt_dt(p.get("start_time"))
@@ -392,9 +456,9 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         try:
             processes = list_processes()
         except (TimeoutError, OSError, ConnectionError, RuntimeError):
-            worker.label_warehouse_1l_count.setText("—")
-            worker.label_warehouse_2l_count.setText("—")
-            worker.label_warehouse_unclassified_count.setText("—")
+            worker.label_warehouse_1l_count.setText("\u2014")
+            worker.label_warehouse_2l_count.setText("\u2014")
+            worker.label_warehouse_unclassified_count.setText("\u2014")
             for bar in (
                 worker.progressBar_1l,
                 worker.progressBar_2l,
@@ -437,7 +501,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         state = _current_fsm_state[0]
         is_active = _controller.is_active
 
-        if is_active and state in ("RUNNING", "SORTING"):
+        if is_active and state == "RUNNING":
             worker.classifyStartButton.setEnabled(False)
             worker.classifyPauseButton.setEnabled(True)
             worker.classifyPauseButton.setText("일시정지")
@@ -634,7 +698,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         pid = _controller.current_pid
         p = next((x for x in _classify_processes if x.get("process_id") == pid), None)
         if p and (p.get("status") or "").upper() == "RUNNING":
-            _update_fsm_display("RUNNING")
+            _update_process_state("RUNNING")
             _start_udp_camera()
             logger.info("[복원] 분류 화면 복귀 → 공정 #%s RUNNING 상태 복원", pid)
 

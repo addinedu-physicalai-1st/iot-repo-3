@@ -154,7 +154,7 @@ class UdpCameraThread(QThread):
                         continue
                     if qr_data:
                         self._last_decoded = qr_data
-                        self._cooldown_until = now + 2.0
+                        self._cooldown_until = now + 1.0
                         logger.info("[UdpCam] QR 발행: %s", qr_data)
                         self.qr_decoded.emit(qr_data)
                         break
@@ -168,6 +168,11 @@ class UdpCameraThread(QThread):
 
     def stop(self):
         self._running = False
+
+    def reset_cooldown(self):
+        """CAMERA_DETECT 수신 시 호출 — 쿨다운 초기화로 즉시 QR 디코딩 가능."""
+        self._cooldown_until = 0
+        self._last_decoded = None
 
 
 # ── MQTT → Qt 시그널 브릿지 (스레드 안전) ────────────────────────

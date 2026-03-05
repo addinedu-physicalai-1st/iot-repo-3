@@ -26,6 +26,7 @@ namespace pin {
     constexpr int SORT_CONFIRM_1L  = 32;   // 1L 분류 완료 확인 (통과 카운트)
     constexpr int SORT_CONFIRM_2L  = 33;   // 2L 분류 완료 확인 (통과 카운트)
     constexpr int SORT_CONFIRM_UNCL= 36;   // 미분류 확인 (말단 낙하, INPUT_ONLY)
+    constexpr int CAMERA_DETECT    = 39;   // 카메라 위치 감지 (QR 인식용 일시정지, INPUT_ONLY)
 
     // RGB LED
     constexpr int LED_R    = 25;
@@ -38,16 +39,17 @@ namespace dc {
     constexpr int LEDC_CHANNEL    = 0;
     constexpr int FREQ_HZ         = 5000;
     constexpr int RESOLUTION_BITS = 8;     // 0–255
-    constexpr int DEFAULT_SPEED   = 200;
+    constexpr int DEFAULT_SPEED   = 180;
 }
 
 // ── 서보 모터 ────────────────────────────────────────────────
 // 범위: -90° ~ +90°. API는 -90~+90, 내부에서 +90 오프셋으로 0~180 변환.
-// CENTER_DEG(0°) = 중립(통과), SORT_DEG(+90°) = 분류 방향.
+// CENTER_DEG(0°) = 중립(통과), SORT_DEG_A/B = 분류 방향 (독립 조정 가능).
 namespace servo {
     constexpr int INIT_DEG   =  0;    // 업로드/재연결 시 초기화 각도
     constexpr int CENTER_DEG =  0;    // 중립 (통과)
-    constexpr int SORT_DEG   = 35;    // 분류 위치
+    constexpr int SORT_DEG_A = 35;    // 1L 분류 위치 (servoA)
+    constexpr int SORT_DEG_B = 35;    // 2L 분류 위치 (servoB)
     constexpr int MIN_US     = 544;
     constexpr int MAX_US     = 2400;
 }
@@ -55,15 +57,16 @@ namespace servo {
 // ── 근접 센서 ────────────────────────────────────────────────
 // analogRead + INPUT_PULLDOWN. 34,35,36은 INPUT_ONLY라 PULLDOWN 미적용.
 namespace sensor {
-    constexpr int           THRESHOLD   = 600;   // 이 값 이상 → 감지
+    constexpr int           THRESHOLD   = 600;    // 이 값 이상 → 감지
+    constexpr int           THRESHOLD_S6 = 3600;  // S6(카메라) 전용 임계값
     constexpr unsigned long DEBOUNCE_MS = 50;
 }
 
-// ── 분류 / 경고 타이밍 ───────────────────────────────────────
+// ── 분류 / 타이밍 ────────────────────────────────────────────
 namespace timing {
-    constexpr unsigned long SORT_HOLD_MS   = 1500;  // 서보 분류 위치 유지 시간
-    constexpr unsigned long SORT_RETURN_MS = 600;   // 서보 중립 복귀 후 대기
-    constexpr unsigned long WARNING_MS     = 3000;  // WARNING 자동 복귀 시간
+    constexpr unsigned long SORT_SAFETY_TIMEOUT_MS = 5000;  // 확인 센서 미응답 시 안전 복귀
+    constexpr unsigned long CAMERA_HOLD_MS = 500;           // 카메라 QR 인식용 일시정지 시간
+    constexpr unsigned long CAMERA_BLANK_MS = 2000;         // 카메라 홀드 해제 후 S6 무시 시간
 }
 
 // ── MQTT (TOPIC_CONTROL, PORT → esp/config_mqtt.h) ─────────────

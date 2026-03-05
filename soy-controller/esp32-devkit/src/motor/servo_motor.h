@@ -35,8 +35,8 @@ public:
     /** 0° (중립/통과) */
     void center();
 
-    /** +90° (분류 위치) */
-    void sort();
+    /** 지정 각도로 분류 위치 이동 */
+    void sort(int deg);
 
     /** PWM 출력 차단 (duty=0). 서보 잔떨림 방지. */
     void disable();

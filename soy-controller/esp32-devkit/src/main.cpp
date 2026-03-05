@@ -1,34 +1,39 @@
 /*
- * Soy-DevKit — 컨베이어 FSM 제어 (서보2 + 센서5)
+ * Soy-DevKit — 컨베이어 FSM 제어 (서보2 + 센서6)
  *
  * 하드웨어:
  *   DC 모터(A4950) + 서보A(1L) + 서보B(2L)
- *   S1: 분류위치 감지/1L  S2: 분류위치 감지/2L
- *   S3: 1L 통과 확인      S4: 2L 통과 확인
+ *   S1: 1L 분류위치 감지      S2: 2L 분류위치 감지
+ *   S3: 1L 통과 확인          S4: 2L 통과 확인
  *   S5: 미분류 확인
+ *   S6: 카메라 위치 감지 (QR 인식용 일시정지)
  *   RGB LED
  *
  * MQTT device/control 명령:
  *   SORT_START         → IDLE → RUNNING
- *   SORT_STOP          → RUNNING → IDLE
- *   SORT_DIR:1L        → _nextSortDir = LINE_1L (S1 감지 시 사용)
- *   SORT_DIR:2L        → _nextSortDir = LINE_2L (S2 감지 시 사용)
+ *   SORT_STOP          → any  → IDLE
+ *   SORT_DIR:1L        → _dirQueue.push(LINE_1L)
+ *   SORT_DIR:2L        → _dirQueue.push(LINE_2L)
  *
  * 분류 흐름:
- *   1. soy-pc QR 인식 → SORT_DIR:1L or 2L 발행 (S1/S2 감지 전 예약)
- *   2. S1 상승에지  → servoA 동작 (1L 분류)
- *      S2 상승에지  → servoB 동작 (2L 분류)
- *   3. S3 상승에지  → SORTED_1L 발행
- *      S4 상승에지  → SORTED_2L 발행
- *      S5 상승에지  → SORTED_UNCLASSIFIED 발행
+ *   1. soy-pc QR 인식 → SORT_DIR:1L or 2L → _dirQueue에 추가
+ *   2. S1 상승에지 → 큐 pop:
+ *      - 1L → servoA.sort() + SORTING_1L 발행
+ *      - 2L → _pending2L++ + DETECTED 발행 (S2에서 처리)
+ *   3. S2 상승에지 → _pending2L>0이면 servoB.sort() + SORTING_2L 발행
+ *   4. S3 상승에지 → servoA.center() + SORTED_1L 발행
+ *      S4 상승에지 → servoB.center() + SORTED_2L 발행
+ *      S5 상승에지 → SORTED_UNCLASSIFIED 발행
+ *   5. Safety timeout → 확인 센서 미응답 시 강제 복귀
  *
  * FSM 상태:
  *   IDLE    — DC OFF, 서보 0° → disable, LED 빨강
  *   RUNNING — DC ON, LED 초록
- *   SORTING — S1 or S2 감지 후 서보 분류 중, LED 파랑
+ *   PAUSED  — DC OFF, LED 노랑
  */
 
 #include <Arduino.h>
+#include <queue>
 
 // ── 프로젝트 모듈 ──────────────────────────────────────────────
 #include "config.h"
@@ -46,39 +51,44 @@ static DcMotor          dcMotor;
 static ServoMotor       servoA;   // 1L 분류
 static ServoMotor       servoB;   // 2L 분류
 static RgbLed           led;
-static ProximitySensor  s1;       // 분류위치 / 1L
-static ProximitySensor  s2;       // 분류위치 / 2L
+static ProximitySensor  s1;       // 1L 분류위치 감지
+static ProximitySensor  s2;       // 2L 분류위치 감지
 static ProximitySensor  s3;       // 1L 통과 확인
 static ProximitySensor  s4;       // 2L 통과 확인
 static ProximitySensor  s5;       // 미분류 확인
+static ProximitySensor  s6;       // 카메라 위치 감지 (QR 인식용)
 static Fsm              fsm;
 static MqttManager      mqtt;
 
 // ── FSM 보조 상태 ──────────────────────────────────────────────
-// SORTING 진입 시 어느 서보를 동작시킬지 기록
-static SortDir _activeSortDir  = SortDir::NONE;
-// S1/S2 감지 직전 soy-pc가 예약한 방향 (SORT_DIR 명령으로 설정)
-static SortDir _nextSortDir    = SortDir::NONE;
+static std::queue<SortDir> _dirQueue;      // 방향 큐 (QR 인식 시 추가)
+static bool _servoASorting   = false;      // servoA 분류 중 여부
+static bool _servoBSorting   = false;      // servoB 분류 중 여부
+static unsigned long _servoAStartMs = 0;   // safety timeout용
+static unsigned long _servoBStartMs = 0;
+static int _pending2L        = 0;          // S1 통과 후 S2 대기 중인 2L 항목 수
 
 static bool _s1Prev = false;
 static bool _s2Prev = false;
 static bool _s3Prev = false;
 static bool _s4Prev = false;
 static bool _s5Prev = false;
+static bool _s6Prev = false;
 
 static int _dcSpeed = config::dc::DEFAULT_SPEED;
 
-// ── 활성 서보 헬퍼 ────────────────────────────────────────────
-static ServoMotor& activeServo() {
-    return (_activeSortDir == SortDir::LINE_2L) ? servoB : servoA;
-}
+// 카메라 감지 타이머
+static unsigned long _cameraHoldUntil  = 0;   // 카메라 홀드 종료 시각
+static unsigned long _cameraBlankUntil = 0;   // 홀드 후 S6 무시 종료 시각
+
+// MQTT 재연결 감지
+static bool _mqttPrevConnected = false;
 
 // ── FSM 상태 전이 ──────────────────────────────────────────────
 static void enterState(State s) {
     Serial.printf("[FSM] %s → %s\n", fsm.stateName(),
         s == State::IDLE    ? "IDLE" :
         s == State::RUNNING ? "RUNNING" :
-        s == State::SORTING ? "SORTING" :
         s == State::PAUSED  ? "PAUSED" : "?");
 
     fsm.enter(s);
@@ -92,8 +102,13 @@ static void enterState(State s) {
             delay(200);
             servoA.disable();
             servoB.disable();
-            _nextSortDir   = SortDir::NONE;
-            _activeSortDir = SortDir::NONE;
+            // 큐/pending 초기화
+            while (!_dirQueue.empty()) _dirQueue.pop();
+            _servoASorting = false;
+            _servoBSorting = false;
+            _pending2L = 0;
+            _cameraHoldUntil = 0;
+            _cameraBlankUntil = 0;
             mqtt.publishStatus("IDLE");
             break;
 
@@ -105,21 +120,10 @@ static void enterState(State s) {
             s3.sync(); _s3Prev = s3.isDetected();
             s4.sync(); _s4Prev = s4.isDetected();
             s5.sync(); _s5Prev = s5.isDetected();
+            s6.sync(); _s6Prev = s6.isDetected();
+            _cameraHoldUntil = 0;
+            _cameraBlankUntil = 0;
             mqtt.publishStatus("RUNNING");
-            break;
-
-        case State::SORTING:
-            // 예약된 방향 스냅샷 적용
-            _activeSortDir = _nextSortDir;
-            // 해당 서보 동작
-            if (_activeSortDir != SortDir::NONE) {
-                activeServo().sort();
-            }
-            mqtt.publish(config::mqtt::TOPIC_SENSOR, "DETECTED");
-            mqtt.publishStatus("SORTING");
-            Serial.printf("[SORT] ServoActive=%s\n",
-                _activeSortDir == SortDir::LINE_1L ? "A(1L)" :
-                _activeSortDir == SortDir::LINE_2L ? "B(2L)" : "NONE");
             break;
 
         case State::PAUSED:
@@ -136,28 +140,21 @@ static void enterState(State s) {
 static void onCommand(const Command& cmd) {
     switch (cmd.type) {
         case CommandType::SORT_START:
-            if (fsm.state() == State::SORTING) {
-                Serial.println("[WARN] SORT_START ignored (SORTING)");
-                return;
+            if (fsm.state() == State::RUNNING) {
+                // 이미 RUNNING → 상태 재발행만 (재진입 방지)
+                mqtt.publishStatus("RUNNING");
+            } else {
+                enterState(State::RUNNING);
             }
-            enterState(State::RUNNING);
             break;
 
         case CommandType::SORT_STOP:
-            if (fsm.state() == State::SORTING) {
-                Serial.println("[WARN] SORT_STOP ignored (SORTING)");
-                return;
-            }
             if (fsm.state() != State::IDLE) {
                 enterState(State::IDLE);
             }
             break;
 
         case CommandType::SORT_PAUSE:
-            if (fsm.state() == State::SORTING) {
-                Serial.println("[WARN] SORT_PAUSE ignored (SORTING)");
-                return;
-            }
             if (fsm.state() == State::RUNNING) {
                 enterState(State::PAUSED);
             }
@@ -170,13 +167,13 @@ static void onCommand(const Command& cmd) {
             break;
 
         case CommandType::SORT_DIR_1L:
-            _nextSortDir = SortDir::LINE_1L;
-            Serial.println("[CMD] SORT_DIR reserved: 1L");
+            _dirQueue.push(SortDir::LINE_1L);
+            Serial.printf("[CMD] SORT_DIR queued: 1L (queue=%d)\n", (int)_dirQueue.size());
             break;
 
         case CommandType::SORT_DIR_2L:
-            _nextSortDir = SortDir::LINE_2L;
-            Serial.println("[CMD] SORT_DIR reserved: 2L");
+            _dirQueue.push(SortDir::LINE_2L);
+            Serial.printf("[CMD] SORT_DIR queued: 2L (queue=%d)\n", (int)_dirQueue.size());
             break;
 
         default:
@@ -184,102 +181,152 @@ static void onCommand(const Command& cmd) {
     }
 }
 
-// ── SORTING 단계 처리 ─────────────────────────────────────────
-static void handleSorting() {
-    unsigned long el = fsm.elapsed();
+// ── 카메라 위치 센서 (S6 → QR 인식용 일시정지) ──────────────
+static void handleCameraDetect() {
+    if (fsm.state() != State::RUNNING) return;
 
-    switch (fsm.sortPhase()) {
-        case SortPhase::HOLDING:
-            if (el >= config::timing::SORT_HOLD_MS) {
-                activeServo().center();
-                fsm.advanceSortPhase();
-                Serial.println("[SORT] Servo → center");
-            }
-            break;
+    unsigned long now = millis();
 
-        case SortPhase::RETURNING:
-            if (el >= config::timing::SORT_HOLD_MS + config::timing::SORT_RETURN_MS) {
-                activeServo().disable();
-                // nextSortDir를 소비했으므로 초기화
-                _nextSortDir = SortDir::NONE;
-                Serial.println("[SORT] Servo disabled → RUNNING");
-                enterState(State::RUNNING);
-            }
-            break;
+    // 카메라 홀드 중 → S6 무시, 타임아웃만 체크
+    if (_cameraHoldUntil > 0) {
+        if (now >= _cameraHoldUntil) {
+            dcMotor.drive(_dcSpeed);
+            _cameraHoldUntil = 0;
+            // 홀드 후 S6 블랭킹: 플로팅 핀 재트리거 방지
+            _cameraBlankUntil = now + config::timing::CAMERA_BLANK_MS;
+            s6.sync(); _s6Prev = s6.isDetected();
+            Serial.println("[SENSOR] Camera hold released → blanking");
+        }
+        return;
     }
+
+    // 블랭킹 기간 → S6 추적만 하고 이벤트 무시
+    if (_cameraBlankUntil > 0) {
+        if (now >= _cameraBlankUntil) {
+            _cameraBlankUntil = 0;
+            s6.sync(); _s6Prev = s6.isDetected();
+        } else {
+            _s6Prev = s6.isDetected();
+        }
+        return;
+    }
+
+    // S6 상승에지 → DC 모터 일시정지
+    bool det6 = s6.isDetected();
+    if (det6 && !_s6Prev) {
+        dcMotor.brake();
+        _cameraHoldUntil = now + config::timing::CAMERA_HOLD_MS;
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "CAMERA_DETECT");
+        Serial.println("[SENSOR] S6 → camera hold");
+    }
+    _s6Prev = det6;
 }
 
-// ── 분류위치 센서 폴링 (S1/S2 → SORTING 전이) ────────────────
+// ── 분류위치 센서 (S1/S2 → 서보 시작) ────────────────────────
 static void handleSortTrigger() {
     if (fsm.state() != State::RUNNING) return;
 
     bool det1 = s1.isDetected();
     bool det2 = s2.isDetected();
 
-    // S1 상승에지
+    // S1 상승에지 → 큐에서 pop하여 방향 결정
     if (det1 && !_s1Prev) {
-        Serial.println("[SENSOR] S1 detected → SORTING (1L)");
-        if (_nextSortDir == SortDir::NONE) {
-            Serial.println("[WARN] S1 감지됐지만 SORT_DIR 미예약 → SORTING(NONE)");
+        if (!_dirQueue.empty()) {
+            SortDir dir = _dirQueue.front();
+            _dirQueue.pop();
+
+            if (dir == SortDir::LINE_1L) {
+                // 1L → servoA 즉시 동작
+                servoA.sort(config::servo::SORT_DEG_A);
+                _servoASorting = true;
+                _servoAStartMs = millis();
+                mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTING_1L");
+                Serial.println("[SORT] S1 + 1L → servoA sort");
+            } else if (dir == SortDir::LINE_2L) {
+                // 2L → S2에서 처리하도록 pending 증가
+                _pending2L++;
+                mqtt.publish(config::mqtt::TOPIC_SENSOR, "DETECTED");
+                Serial.printf("[SORT] S1 + 2L → pending2L=%d\n", _pending2L);
+            }
+        } else {
+            Serial.println("[WARN] S1 감지됐지만 큐 비어있음");
+            mqtt.publish(config::mqtt::TOPIC_SENSOR, "DETECTED");
         }
-        enterState(State::SORTING);
     }
-    // S2 상승에지 (S1 동시 처리 방지: SORTING 미진입 시만)
-    else if (det2 && !_s2Prev && fsm.state() == State::RUNNING) {
-        Serial.println("[SENSOR] S2 detected → SORTING (2L)");
-        if (_nextSortDir == SortDir::NONE) {
-            Serial.println("[WARN] S2 감지됐지만 SORT_DIR 미예약 → SORTING(NONE)");
+
+    // S2 상승에지 → pending2L이 있으면 servoB 동작
+    if (det2 && !_s2Prev) {
+        if (_pending2L > 0) {
+            _pending2L--;
+            servoB.sort(config::servo::SORT_DEG_B);
+            _servoBSorting = true;
+            _servoBStartMs = millis();
+            mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTING_2L");
+            Serial.printf("[SORT] S2 → servoB sort (pending2L=%d)\n", _pending2L);
         }
-        enterState(State::SORTING);
     }
 
     _s1Prev = det1;
     _s2Prev = det2;
 }
 
-// ── 확인 센서 폴링 (S3/S4/S5 → SORTED_* 발행) ────────────────
-// FSM 상태에 무관하게 항상 폴링 (단, IDLE에서는 카운트 무시)
-static void handleConfirmSensors() {
+// ── 확인 센서 + 서보 복귀 (S3/S4 → 서보 center + SORTED 발행) ──
+static void handleServoConfirm() {
     if (fsm.state() == State::IDLE || fsm.state() == State::PAUSED) {
-        // IDLE/PAUSED 중에는 이전 상태만 업데이트해 상승에지 오인 방지
         _s3Prev = s3.isDetected();
         _s4Prev = s4.isDetected();
-        _s5Prev = s5.isDetected();
         return;
     }
 
     bool det3 = s3.isDetected();
     bool det4 = s4.isDetected();
-    bool det5 = s5.isDetected();
 
-    if (det3 && !_s3Prev) {
+    // S3 상승에지 → servoA 복귀 + SORTED_1L 발행
+    if (det3 && !_s3Prev && _servoASorting) {
+        servoA.center();
+        _servoASorting = false;
         mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_1L");
-        Serial.println("[CONFIRM] S3 → SORTED_1L");
+        Serial.println("[CONFIRM] S3 → servoA center + SORTED_1L");
     }
-    if (det4 && !_s4Prev) {
+
+    // S4 상승에지 → servoB 복귀 + SORTED_2L 발행
+    if (det4 && !_s4Prev && _servoBSorting) {
+        servoB.center();
+        _servoBSorting = false;
         mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_2L");
-        Serial.println("[CONFIRM] S4 → SORTED_2L");
-    }
-    if (det5 && !_s5Prev) {
-        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_UNCLASSIFIED");
-        Serial.println("[CONFIRM] S5 → SORTED_UNCLASSIFIED");
+        Serial.println("[CONFIRM] S4 → servoB center + SORTED_2L");
     }
 
     _s3Prev = det3;
     _s4Prev = det4;
-    _s5Prev = det5;
+
+    // Safety timeout: 확인 센서 미응답 시 강제 복귀
+    unsigned long now = millis();
+    if (_servoASorting && (now - _servoAStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
+        servoA.center();
+        _servoASorting = false;
+        Serial.println("[TIMEOUT] servoA safety return");
+    }
+    if (_servoBSorting && (now - _servoBStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
+        servoB.center();
+        _servoBSorting = false;
+        Serial.println("[TIMEOUT] servoB safety return");
+    }
 }
 
-// ── FSM 디스패치 ─────────────────────────────────────────────
-static void runFsm() {
-    switch (fsm.state()) {
-        case State::SORTING:
-            handleSorting();
-            break;
-        default:
-            handleSortTrigger();
-            break;
+// ── 미분류 센서 (S5 → SORTED_UNCLASSIFIED 발행) ────────────────
+static void handleUnclassified() {
+    if (fsm.state() == State::IDLE || fsm.state() == State::PAUSED) {
+        _s5Prev = s5.isDetected();
+        return;
     }
+
+    bool det5 = s5.isDetected();
+    if (det5 && !_s5Prev) {
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_UNCLASSIFIED");
+        Serial.println("[CONFIRM] S5 → SORTED_UNCLASSIFIED");
+    }
+    _s5Prev = det5;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -304,12 +351,13 @@ void setup() {
     // RGB LED
     led.begin(config::pin::LED_R, config::pin::LED_G, config::pin::LED_B);
 
-    // 근접 센서 5개
+    // 근접 센서 6개
     s1.begin(config::pin::SORT_POS_1L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s2.begin(config::pin::SORT_POS_2L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s3.begin(config::pin::SORT_CONFIRM_1L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s4.begin(config::pin::SORT_CONFIRM_2L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s5.begin(config::pin::SORT_CONFIRM_UNCL, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s6.begin(config::pin::CAMERA_DETECT, 0, config::sensor::DEBOUNCE_MS, true, true);  // 디지털 모드, Active-Low 적용
 
     // WiFi
     wifi_manager::connect();
@@ -330,18 +378,31 @@ void setup() {
 void loop() {
     mqtt.loop();
 
+    // MQTT 재연결 감지 → 현재 FSM 상태 재발행
+    {
+        bool nowConn = mqtt.connected();
+        if (nowConn && !_mqttPrevConnected) {
+            mqtt.publishStatus(fsm.stateName());
+            Serial.println("[MQTT] Reconnected → re-publish state");
+        }
+        _mqttPrevConnected = nowConn;
+    }
+
     // ADC 주기 디버그 (1000ms마다)
     {
         static unsigned long lastDbg = 0;
         unsigned long now = millis();
         if (now - lastDbg >= 1000) {
-            Serial.printf("[DBG] S1=%d S2=%d S3=%d S4=%d S5=%d  dir=%d  state=%s\n",
-                s1.readRaw(), s2.readRaw(), s3.readRaw(), s4.readRaw(), s5.readRaw(),
-                (int)_nextSortDir, fsm.stateName());
+            Serial.printf("[DBG] S1=%d S2=%d S3=%d S4=%d S5=%d S6=%d  q=%d  state=%s  sA=%d sB=%d p2L=%d\n",
+                s1.readRaw(), s2.readRaw(), s3.readRaw(), s4.readRaw(), s5.readRaw(), s6.readRaw(),
+                (int)_dirQueue.size(), fsm.stateName(),
+                _servoASorting, _servoBSorting, _pending2L);
             lastDbg = now;
         }
     }
 
-    runFsm();
-    handleConfirmSensors();
+    handleCameraDetect();    // S6 → QR용 일시정지
+    handleSortTrigger();     // S1/S2 → 서보 시작
+    handleServoConfirm();    // S3/S4 → 서보 복귀 + SORTED 발행 + timeout
+    handleUnclassified();    // S5 → SORTED_UNCLASSIFIED
 }

@@ -7,6 +7,7 @@ worker_screen.py 에서 콜백(ProcessCallbacks)으로 UI 업데이트를 위임
 
 import json
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,7 +36,6 @@ class FsmState(str, Enum):
 
     IDLE = "IDLE"
     RUNNING = "RUNNING"
-    SORTING = "SORTING"
     PAUSED = "PAUSED"
 
     @classmethod
@@ -64,7 +64,10 @@ class SensorEvent(str, Enum):
 
     PROXIMITY_ON = "PROXIMITY:1"
     PROXIMITY_OFF = "PROXIMITY:0"
+    CAMERA_DETECT = "CAMERA_DETECT"
     DETECTED = "DETECTED"
+    SORTING_1L = "SORTING_1L"
+    SORTING_2L = "SORTING_2L"
     SORTED_1L = "SORTED_1L"
     SORTED_2L = "SORTED_2L"
     SORTED_UNCLASSIFIED = "SORTED_UNCLASSIFIED"
@@ -98,6 +101,9 @@ class ProcessCallbacks(Protocol):
     ) -> None: ...
     def on_qr_error(self, message: str) -> None: ...
     def on_error(self, message: str) -> None: ...
+    def on_sorting_started(self, station: str) -> None: ...
+    def on_sorting_ended(self, station: str) -> None: ...
+    def on_pending_updated(self, items: list[tuple[str, str]]) -> None: ...
 
 
 # ── 공정 상태 구조체 ──────────────────────────────────────────
@@ -109,6 +115,9 @@ class ProcessState:
     order_items: list[dict] = field(default_factory=list)
     sort_queue: deque[str] = field(default_factory=deque)
     process_data: dict | None = None  # 서버에서 가져온 공정 dict 캐시
+    pending_items: list[tuple[str, str]] = field(default_factory=list)  # (item_code, direction)
+    station_1l_active: bool = False
+    station_2l_active: bool = False
 
     @property
     def is_active(self) -> bool:
@@ -119,15 +128,22 @@ class ProcessState:
         self.order_items = []
         self.sort_queue.clear()
         self.process_data = None
+        self.pending_items = []
+        self.station_1l_active = False
+        self.station_2l_active = False
 
 
 # ── 컨트롤러 ─────────────────────────────────────────────────
 class ProcessController:
     """공정 생명주기 관리 — GUI와 분리된 비즈니스 로직."""
 
+    _WATCHDOG_INTERVAL_S = 10.0  # Watchdog 최소 재전송 간격
+
     def __init__(self, callbacks: ProcessCallbacks) -> None:
         self._cb = callbacks
         self._state = ProcessState()
+        self._last_watchdog_ts: float = 0.0
+        self._qr_gate_open: bool = False
 
     # ── 공정 시작/중지 ────────────────────────────────────────
 
@@ -143,6 +159,7 @@ class ProcessController:
         self._state.reset()
         self._state.process_id = pid
         self._state.process_data = process_data
+        self._qr_gate_open = False
 
         # 주문 품목 캐시
         order_id = process_data.get("order_id")
@@ -208,10 +225,19 @@ class ProcessController:
         if state == FsmState.PAUSED:
             return
 
-        # Watchdog: ESP32 IDLE인데 공정 진행 중이면 SORT_START 재전송
+        # RUNNING 수신 → watchdog 타이머 리셋
+        if state == FsmState.RUNNING:
+            self._last_watchdog_ts = 0.0
+            return
+
+        # Watchdog: ESP32 IDLE인데 공정 진행 중이면 SORT_START 재전송 (쓰로틀링)
         if state == FsmState.IDLE and self._state.is_active:
+            now = time.monotonic()
+            if now - self._last_watchdog_ts < self._WATCHDOG_INTERVAL_S:
+                return
+            self._last_watchdog_ts = now
             logger.warning(
-                "[Watchdog] ESP32 IDLE but process %s active → re-send",
+                "[Watchdog] ESP32 IDLE but process %s active → re-send SORT_START",
                 self._state.process_id,
             )
             mqtt_client.publish(TOPIC_CONTROL, "SORT_START")
@@ -222,21 +248,56 @@ class ProcessController:
         if event is None:
             return
 
-        if event == SensorEvent.PROXIMITY_ON:
+        if event == SensorEvent.CAMERA_DETECT:
+            self._qr_gate_open = True
+            return
+        elif event == SensorEvent.PROXIMITY_ON:
             self._cb.on_proximity(True)
         elif event == SensorEvent.PROXIMITY_OFF:
             self._cb.on_proximity(False)
         elif event == SensorEvent.DETECTED:
             self._handle_detected()
-        elif event in (
-            SensorEvent.SORTED_1L,
-            SensorEvent.SORTED_2L,
-            SensorEvent.SORTED_UNCLASSIFIED,
-        ):
+        elif event == SensorEvent.SORTING_1L:
+            self._state.station_1l_active = True
+            self._cb.on_sorting_started("1L")
+        elif event == SensorEvent.SORTING_2L:
+            self._state.station_2l_active = True
+            self._cb.on_sorting_started("2L")
+        elif event == SensorEvent.SORTED_1L:
+            self._state.station_1l_active = False
+            self._cb.on_sorting_ended("1L")
+            # pending에서 첫 1L 항목 제거
+            for i, (code, d) in enumerate(self._state.pending_items):
+                if d == "1L":
+                    self._state.pending_items.pop(i)
+                    break
+            self._cb.on_pending_updated(list(self._state.pending_items))
+            self._handle_sort_result(event, processes)
+        elif event == SensorEvent.SORTED_2L:
+            self._state.station_2l_active = False
+            self._cb.on_sorting_ended("2L")
+            # pending에서 첫 2L 항목 제거
+            for i, (code, d) in enumerate(self._state.pending_items):
+                if d == "2L":
+                    self._state.pending_items.pop(i)
+                    break
+            self._cb.on_pending_updated(list(self._state.pending_items))
+            self._handle_sort_result(event, processes)
+        elif event == SensorEvent.SORTED_UNCLASSIFIED:
+            # pending에서 첫 항목 제거 (방향 무관)
+            if self._state.pending_items:
+                self._state.pending_items.pop(0)
+                self._cb.on_pending_updated(list(self._state.pending_items))
             self._handle_sort_result(event, processes)
 
     def handle_qr(self, item_code: str | None) -> None:
-        """QR 인식 결과 → 방향 큐에 enqueue."""
+        """QR 인식 결과 → 즉시 SORT_DIR 발행 + 큐 기록 + 대기 목록 갱신.
+        CAMERA_DETECT 수신 후 1회만 처리 (게이트 방식)."""
+        if not self._qr_gate_open:
+            logger.debug("[QR] Gate closed, ignoring: %s", item_code)
+            return
+        self._qr_gate_open = False  # 1회 처리 후 게이트 닫기
+
         if item_code is None or not item_code.strip():
             self._state.sort_queue.append(SortDirection.WARN.value)
             self._cb.on_qr_error("item_code 없음")
@@ -244,24 +305,27 @@ class ProcessController:
 
         direction = self._resolve_direction(item_code)
         self._state.sort_queue.append(direction.value)
+        # 대기 목록에 추가
+        self._state.pending_items.append((item_code, direction.value))
+        self._cb.on_pending_updated(list(self._state.pending_items))
+        # S1/S2 감지 전 예약: 즉시 ESP32에 방향 전송
+        mqtt_client.publish(TOPIC_CONTROL, f"SORT_DIR:{direction.value}")
+        logger.info("[QR] SORT_DIR:%s 즉시 전송", direction.value)
         self._cb.on_qr_enqueued(item_code, direction.value, len(self._state.sort_queue))
 
     # ── 내부 로직 ────────────────────────────────────────────
 
     def _handle_detected(self) -> None:
-        """S1/S2 감지 → 큐에서 방향 꺼내 ESP32에 발행."""
+        """S1/S2 감지 → 큐 소비 + UI 업데이트. SORT_DIR은 handle_qr()에서 이미 전송됨."""
         if self._state.sort_queue:
             direction = self._state.sort_queue.popleft()
-            mqtt_client.publish(TOPIC_CONTROL, f"SORT_DIR:{direction}")
             logger.info(
-                "[Queue] DETECTED → SORT_DIR:%s (남은: %d)",
-                direction,
+                "[Queue] DETECTED (남은: %d)",
                 len(self._state.sort_queue),
             )
         else:
             direction = SortDirection.WARN.value
-            mqtt_client.publish(TOPIC_CONTROL, f"SORT_DIR:{direction}")
-            logger.warning("[Queue] DETECTED but queue empty → WARN")
+            logger.warning("[Queue] DETECTED but queue empty")
 
         self._cb.on_detected(direction, len(self._state.sort_queue))
 

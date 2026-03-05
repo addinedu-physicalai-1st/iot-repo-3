@@ -39,8 +39,8 @@ namespace udp {
 namespace camera {
     constexpr int  JPEG_QUALITY      = 12;   // 0-63, 낮을수록 고품질
     constexpr int  XCLK_FREQ_HZ     = 20000000;
-    constexpr int  FB_COUNT          = 1;
-    constexpr unsigned long FRAME_INTERVAL_MS = 200;  // ~5 FPS
+    constexpr int  FB_COUNT          = 2;    // 더블 버퍼링
+    constexpr unsigned long FRAME_INTERVAL_MS = 80;   // ~12 FPS
 }
 
 // mqtt (TOPIC_CONTROL, PORT) → esp/config_mqtt.h

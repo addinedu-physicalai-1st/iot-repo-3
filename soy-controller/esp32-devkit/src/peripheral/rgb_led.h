@@ -5,8 +5,6 @@
  * FSM 상태별 색상:
  *   IDLE    → 빨강
  *   RUNNING → 초록
- *   SORTING → 파랑
- *   WARNING → 노랑 (R+G)
  *   PAUSED  → 노랑 (R+G)
  */
 #pragma once

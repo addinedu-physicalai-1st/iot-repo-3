@@ -27,8 +27,6 @@ void RgbLed::forState(State s) {
     switch (s) {
         case State::IDLE:    red();    break;
         case State::RUNNING: green();  break;
-        case State::SORTING: blue();   break;
-        case State::WARNING: yellow(); break;
         case State::PAUSED:  yellow(); break;
     }
 }

@@ -33,9 +33,9 @@ void UdpStreamer::sendFrame(camera_fb_t* fb) {
         _udp.write(fb->buf + offset, payloadSize);
 
         if (_udp.endPacket()) {
-            delay(15);
+            delay(5);
         } else {
-            delay(30);
+            delay(10);
         }
     }
 

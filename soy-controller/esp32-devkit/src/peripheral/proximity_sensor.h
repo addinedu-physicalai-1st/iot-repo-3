@@ -10,12 +10,14 @@
 class ProximitySensor {
 public:
     /**
-     * ADC 초기화.
-     * @param pin        아날로그 입력 핀 (예: 34)
-     * @param threshold  감지 임계값 (0–4095)
+     * 센서 초기화.
+     * @param pin        입력 핀 (예: 34, 39 등)
+     * @param threshold  아날로그 감지 임계값 (0–4095). 디지털 모드일 경우 무시됨.
      * @param debounceMs 디바운스 시간 (ms)
+     * @param isDigital  디지털 모드 여부 (기본값 false: 아날로그 읽기)
+     * @param activeLow  디지털 모드일 때 LOW를 감지 상태로 볼지 여부 (기본값 false: HIGH 감지)
      */
-    void begin(int pin, int threshold, unsigned long debounceMs);
+    void begin(int pin, int threshold, unsigned long debounceMs, bool isDigital = false, bool activeLow = false);
 
     /**
      * ADC 원시 값을 읽는다 (0–4095).
@@ -40,4 +42,6 @@ private:
     unsigned long _debounceMs = 50;
     bool          _lastState  = false;
     unsigned long _lastChange = 0;
+    bool          _isDigital  = false;
+    bool          _activeLow  = false;
 };

@@ -33,8 +33,8 @@ void ServoMotor::center() {
     setAngle(config::servo::CENTER_DEG);  // 0°
 }
 
-void ServoMotor::sort() {
-    setAngle(config::servo::SORT_DEG);   // +90°
+void ServoMotor::sort(int deg) {
+    setAngle(deg);
 }
 
 void ServoMotor::disable() {
