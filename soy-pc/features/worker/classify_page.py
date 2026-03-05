@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
 )
 
-from api import list_processes, process_update
+from api import list_processes, process_update, list_inventory
 from features.worker.threads import UdpCameraThread, MqttSignalBridge
 from features.worker.inbound_dialog import parse_qr_payload
 from features.worker.process_controller import (
@@ -454,7 +454,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     # ── 창고 현황 ────────────────────────────────────────────────
     def _refresh_warehouse_chart():
         try:
-            processes = list_processes()
+            inventory = list_inventory()
         except (TimeoutError, OSError, ConnectionError, RuntimeError):
             worker.label_warehouse_1l_count.setText("\u2014")
             worker.label_warehouse_2l_count.setText("\u2014")
@@ -467,9 +467,19 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
                 bar.setMaximum(WAREHOUSE_TOTAL)
                 bar.setValue(0)
             return
-        total_1l = sum(p.get("success_1l_qty", 0) or 0 for p in processes)
-        total_2l = sum(p.get("success_2l_qty", 0) or 0 for p in processes)
-        total_uncl = sum(p.get("unclassified_qty", 0) or 0 for p in processes)
+        # inventory_id 기준: 1 = 1L 창고, 2 = 2L 창고, 3 = 미분류 창고
+        total_1l = 0
+        total_2l = 0
+        total_uncl = 0
+        for inv in inventory:
+            inv_id = inv.get("inventory_id")
+            qty = inv.get("current_qty") or 0
+            if inv_id == 1:
+                total_1l = qty
+            elif inv_id == 2:
+                total_2l = qty
+            elif inv_id == 3:
+                total_uncl = qty
         worker.label_warehouse_1l_count.setText(f"{total_1l}/{WAREHOUSE_TOTAL}")
         worker.label_warehouse_2l_count.setText(f"{total_2l}/{WAREHOUSE_TOTAL}")
         worker.label_warehouse_unclassified_count.setText(
