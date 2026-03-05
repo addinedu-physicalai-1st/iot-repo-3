@@ -137,14 +137,32 @@ def _open_worker_info_dialog(
 
 def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     """관리자 화면: 사이드바, 작업자 관리(목록·추가·정보 팝업), 출입 로그."""
+    from PyQt6.QtWidgets import QHeaderView, QSizePolicy
+
     admin = window.page_admin
+    admin.admin_content_stack.setSizePolicy(
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+    )
     admin.workerTable.setHorizontalHeaderLabels(["이름", "카드 UID", "등록일자"])
     admin.accessLogTable.setHorizontalHeaderLabels(
         ["작업자 이름", "출입 방향", "일시"]
     )
+    admin.accessLogTable.horizontalHeader().setMinimumSectionSize(140)
+    admin.accessLogTable.horizontalHeader().resizeSection(0, 160)
+    admin.accessLogTable.horizontalHeader().resizeSection(1, 100)
+    admin.accessLogTable.horizontalHeader().resizeSection(2, 180)
+    admin.page_access_log.layout().setContentsMargins(12, 16, 12, 12)
+    admin.accessLogSearchEdit.setSizePolicy(
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+    )
     admin.itemSortingLogTable.setHorizontalHeaderLabels(
         ["품목명", "QR 코드", "상태", "작업시간"]
     )
+    admin.itemSortingLogTable.horizontalHeader().setMinimumSectionSize(80)
+    admin.itemSortingLogTable.horizontalHeader().resizeSection(0, 180)
+    admin.itemSortingLogTable.horizontalHeader().resizeSection(1, 120)
+    admin.itemSortingLogTable.horizontalHeader().resizeSection(2, 80)
+    admin.itemSortingLogTable.horizontalHeader().resizeSection(3, 180)
 
     # 재고 리포트: 도넛 차트 위젯
     from PyQt6.QtWidgets import (
@@ -210,6 +228,7 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     access_pager.addStretch(1)
     # title(0) + search(1) + table(2) 바로 아래(3)
     admin.page_access_log.layout().insertLayout(3, access_pager)
+    admin.page_access_log.layout().setStretch(2, 1)
 
     item_pager = QHBoxLayout()
     item_pager.setSpacing(6)
@@ -232,6 +251,7 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     item_pager.addStretch(1)
     # title(0) + filter(1) + table(2) 바로 아래(3)
     admin.page_item_sorting_log.layout().insertLayout(3, item_pager)
+    admin.page_item_sorting_log.layout().setStretch(2, 1)
 
     def _format_created_at(created_at: str) -> str:
         """API created_at (ISO) → 날짜만 표시 (YYYY-MM-DD)."""
@@ -264,14 +284,13 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
         return max(1, min(n, total_pages))
 
     def _fit_table_height(table, visible_rows: int) -> None:
-        """페이지 컨트롤이 표 바로 아래에 오도록 테이블 높이를 행 수에 맞춤."""
+        """페이지 컨트롤이 표 바로 아래에 오도록 테이블 최소 높이 설정 (max는 제거해 레이아웃이 넓게 쓸 수 있게)."""
         rows = max(1, int(visible_rows))
         header_h = table.horizontalHeader().height()
         frame = table.frameWidth() * 2
         row_h = table.verticalHeader().defaultSectionSize()
         total_h = header_h + (row_h * rows) + frame + 4
         table.setMinimumHeight(total_h)
-        table.setMaximumHeight(total_h)
 
     def _render_access_logs_page():
         nonlocal access_page
