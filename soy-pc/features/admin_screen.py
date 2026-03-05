@@ -665,8 +665,8 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                     pass
 
     def export_inventory_status_to_pdf():
-        from PyQt6.QtCore import QMarginsF, QRect, Qt
-        from PyQt6.QtGui import QPainter, QPageLayout, QPageSize, QPdfWriter, QColor, QPen
+        from PyQt6.QtCore import QMarginsF, QPoint, QRect, Qt
+        from PyQt6.QtGui import QColor, QFont, QPainter, QPageLayout, QPageSize, QPdfWriter, QPixmap
 
         path, _ = QFileDialog.getSaveFileName(
             window,
@@ -680,69 +680,75 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
             path += ".pdf"
 
         try:
-            # PDF에는 합산/분리 두 화면을 함께 담는다.
             current_split = bool(admin.toggleInventoryStatusSplitButton.isChecked())
-            inventory_status_chart.set_split_by_category(False)
-            agg_pixmap = inventory_status_chart.grab()
-            inventory_status_chart.set_split_by_category(True)
-            split_pixmap = inventory_status_chart.grab()
+
+            def capture_chart_pixmap(split_mode: bool):
+                inventory_status_chart.set_split_by_category(split_mode)
+                pm = QPixmap(inventory_status_chart.size())
+                pm.fill(QColor("#ffffff"))
+                p = QPainter(pm)
+                inventory_status_chart.render(p, QPoint(0, 0))
+                p.end()
+                return pm
+
+            agg_pixmap = capture_chart_pixmap(False)
+            split_pixmap = capture_chart_pixmap(True)
             inventory_status_chart.set_split_by_category(current_split)
 
             if agg_pixmap.isNull() or split_pixmap.isNull():
                 raise RuntimeError("차트를 캡처할 수 없습니다.")
 
-            # 캡처 이미지 주변 불필요 여백을 잘라내어 PDF 비율을 안정화
-            def trim_chart(pm):
-                w, h = pm.width(), pm.height()
-                # 좌측 정보(몽고 라벨 등)가 잘리지 않도록 left crop은 작게 유지
-                l = int(w * 0.025)
-                r = int(w * 0.035)
-                t = int(h * 0.04)
-                b = int(h * 0.06)
-                return pm.copy(l, t, max(1, w - l - r), max(1, h - t - b))
+            # --- mm 기반 레이아웃 (A4 210×297 mm 기준) ---
+            DPI = 300
+            MM_TO_PX = DPI / 25.4  # ≈ 11.81
 
-            agg_chart = trim_chart(agg_pixmap)
-            split_chart = trim_chart(split_pixmap)
+            def mm2px(mm_val: float) -> int:
+                return int(mm_val * MM_TO_PX)
 
             pdf = QPdfWriter(path)
             pdf.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-            pdf.setResolution(300)
-            pdf.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout.Unit.Millimeter)
+            pdf.setResolution(DPI)
+            # 좌측 여백 줄이고 우측 여백 늘려서 전체 콘텐츠를 왼쪽으로 이동
+            pdf.setPageMargins(QMarginsF(10, 12, 20, 12), QPageLayout.Unit.Millimeter)
 
             painter = QPainter(pdf)
-            page_rect = pdf.pageLayout().paintRectPixels(pdf.resolution())
-            painter.fillRect(page_rect, QColor("#ffffff"))
+            content = pdf.pageLayout().paintRectPixels(DPI)
+            painter.fillRect(content, QColor("#ffffff"))
 
-            # 페이지를 상/하 2개 카드로 나눠 비율 맞춰 배치
-            outer_pad = 16
-            section_gap = 16
-            section_w = page_rect.width() - (outer_pad * 2)
-            section_h = (page_rect.height() - (outer_pad * 2) - section_gap) // 2
+            # 1) 헤더 영역: 전체 너비 사용, 출력시간 우측 정렬 (잘림 방지)
+            header_h = mm2px(10)
+            header_rect = QRect(content.x(), content.y(), content.width(), header_h)
+            ts_font = QFont()
+            ts_font.setPointSize(8)
+            painter.setFont(ts_font)
+            painter.setPen(QColor("#333333"))
+            ts_text = f"출력시간 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            painter.drawText(
+                header_rect,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                ts_text,
+            )
 
-            def draw_section(y_top: int, chart_pm) -> None:
-                sec = QRect(page_rect.x() + outer_pad, y_top, section_w, section_h)
-                painter.fillRect(sec, QColor("#f6f6f4"))
-                painter.setPen(QPen(QColor("#d9d9d6"), 1))
-                painter.drawRect(sec)
+            # 2) 본문: 헤더 아래 동일 높이 2섹션
+            gap = mm2px(6)
+            body_top = content.y() + header_h
+            body_h = content.height() - header_h
+            section_h = (body_h - gap) // 2
 
-                # 차트 영역
-                chart_area = QRect(sec.x() + 8, sec.y() + 8, sec.width() - 16, sec.height() - 16)
-                src_w, src_h = chart_pm.width(), chart_pm.height()
-                if src_w <= 0 or src_h <= 0:
+            def draw_chart_section(sect_top: int, chart_pm: QPixmap) -> None:
+                sect_rect = QRect(content.x(), sect_top, content.width(), section_h)
+                sw, sh = chart_pm.width(), chart_pm.height()
+                if sw <= 0 or sh <= 0:
                     return
-                scale = min(chart_area.width() / src_w, chart_area.height() / src_h)
-                draw_w = max(1, int(src_w * scale))
-                draw_h = max(1, int(src_h * scale))
-                # 캡처 이미지 내부 여백 비대칭으로 약간 우측 치우쳐 보이는 현상 보정
-                center_bias_px = 10
-                dx = chart_area.x() + (chart_area.width() - draw_w) // 2 - center_bias_px
-                dy = chart_area.y() + (chart_area.height() - draw_h) // 2
-                painter.drawPixmap(dx, dy, draw_w, draw_h, chart_pm)
+                scale = min(sect_rect.width() / sw, sect_rect.height() / sh) * 0.95
+                dw = max(1, int(sw * scale))
+                dh = max(1, int(sh * scale))
+                dx = sect_rect.x() + (sect_rect.width() - dw) // 2
+                dy = sect_rect.y() + (sect_rect.height() - dh) // 2
+                painter.drawPixmap(dx, dy, dw, dh, chart_pm)
 
-            first_y = page_rect.y() + outer_pad
-            second_y = first_y + section_h + section_gap
-            draw_section(first_y, agg_chart)
-            draw_section(second_y, split_chart)
+            draw_chart_section(body_top, agg_pixmap)
+            draw_chart_section(body_top + section_h + gap, split_pixmap)
             painter.end()
 
             box = MessageBox("저장 완료", f"PDF가 저장되었습니다.\n{path}", window)
