@@ -37,6 +37,20 @@
 | TCP | SoyService | 공정 시작 | `{ "process_id": integer }` | `{ "process_id": integer, "order_id": integer, "status": string, "success_1l_qty": integer, "success_2l_qty": integer, "unclassified_qty": integer }` |
 | TCP | SoyService | 공정 중지 | `{ "process_id": integer }` | `{ "process_id": integer, "order_id": integer, "status": string, "success_1l_qty": integer, "success_2l_qty": integer, "unclassified_qty": integer }` |
 | TCP | SoyService | 분류 수량 갱신 | `{ "process_id": integer, "success_1l_qty"?: integer, "success_2l_qty"?: integer, "unclassified_qty"?: integer }` | `{ "process_id": integer, "order_id": integer, "status": string, "success_1l_qty": integer, "success_2l_qty": integer, "unclassified_qty": integer }` |
+| MQTT | ESP32-DevKit / ESP32-CAM | 분류 제어 명령 발행 | 토픽 `device/control`, payload 문자열 `"SORT_START"`, `"SORT_STOP"`, `"SORT_PAUSE"`, `"SORT_RESUME"`, `"SORT_DIR:1L"`, `"SORT_DIR:2L"`, `"SORT_DIR:WARN"` | MQTT 프로토콜 상 응답 없음 (DevKit/CAM에서 DC·카메라 제어 반영) |
+
+---
+
+## MQTT Broker
+
+MQTT 브로커가 구독자(분류키트)에게 전달하는 메시지입니다. 발행 주체는 SoyWorkerUI(process_controller)이며, 브로커를 경유해 Soy Controller(ESP32-DevKit / ESP32-CAM)가 수신합니다.
+
+| 프로토콜 | 수신 | API 명 | 요청 (형식) | 응답 (형식) |
+| :--- | :--- | :--- | :--- | :--- |
+| MQTT | ESP32-DevKit / ESP32-CAM | 분류 제어 명령 전달 | 토픽 `device/control`, payload 문자열 `"SORT_START"`, `"SORT_STOP"`, `"SORT_PAUSE"`, `"SORT_RESUME"`, `"SORT_DIR:1L"`, `"SORT_DIR:2L"` | MQTT 프로토콜 상 응답 없음 (DevKit: DC·센서 제어, CAM: 스트리밍 ON/OFF) |
+
+- **ESP32-DevKit**: `soy-controller/esp32-devkit/src/net/mqtt_manager.cpp` 에서 `config::mqtt::TOPIC_CONTROL` 구독, 수신 시 `Command::parse()` 후 DC 모터·방향 큐 제어.
+- **ESP32-CAM**: `soy-controller/esp32-cam/src/net/mqtt_manager.cpp` 에서 동일 토픽 구독, `SORT_START`/`SORT_STOP` 만 처리하여 스트리밍 상태 전환.
 
 ---
 
