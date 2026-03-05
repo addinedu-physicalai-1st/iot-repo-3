@@ -20,7 +20,11 @@ def _try_decode_qr(pyzbar_mod, cv2, frame):
         return results
 
     # 2차: 90°, 180°, 270° 회전
-    for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+    for rot in [
+        cv2.ROTATE_90_CLOCKWISE,
+        cv2.ROTATE_180,
+        cv2.ROTATE_90_COUNTERCLOCKWISE,
+    ]:
         rotated = cv2.rotate(frame, rot)
         results = pyzbar_mod.decode(rotated)
         if results:
@@ -152,7 +156,9 @@ class UdpCameraThread(QThread):
                         qr_data = obj.data.decode("utf-8", errors="strict").strip()
                     except Exception:
                         continue
-                    if qr_data:
+                    # 동일 QR 중복 방지: 같은 QR이 연속 감지되면 무시
+                    # reset_cooldown() (CAMERA_DETECT 수신 시) 호출로 _last_decoded 초기화 후 허용
+                    if qr_data and qr_data != self._last_decoded:
                         self._last_decoded = qr_data
                         self._cooldown_until = now + 1.0
                         logger.info("[UdpCam] QR 발행: %s", qr_data)

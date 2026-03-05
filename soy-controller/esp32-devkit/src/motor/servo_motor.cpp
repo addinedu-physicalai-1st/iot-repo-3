@@ -34,7 +34,7 @@ void ServoMotor::center() {
 }
 
 void ServoMotor::sort(int deg) {
-    setAngle(deg);
+    setAngle(-deg);  // 방향 반전
 }
 
 void ServoMotor::disable() {

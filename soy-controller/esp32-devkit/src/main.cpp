@@ -75,11 +75,14 @@ static bool _s4Prev = false;
 static bool _s5Prev = false;
 static bool _s6Prev = false;
 
-static int _dcSpeed = config::dc::DEFAULT_SPEED;
+static int _dcSpeed  = config::dc::DEFAULT_SPEED;
+static int _sortDegA = config::servo::SORT_DEG_A;
+static int _sortDegB = config::servo::SORT_DEG_B;
 
-// 카메라 감지 타이머
-static unsigned long _cameraHoldUntil  = 0;   // 카메라 홀드 종료 시각
-static unsigned long _cameraBlankUntil = 0;   // 홀드 후 S6 무시 종료 시각
+// 카메라 감지 상태
+static bool          _cameraWaitingForDir = false;  // S6 감지 후 SORT_DIR 대기 중
+static unsigned long _cameraWaitStart     = 0;      // 대기 시작 시간 (safety timeout용)
+static unsigned long _cameraBlankUntil    = 0;      // 홀드 후 S6 무시 종료 시각
 
 // MQTT 재연결 감지
 static bool _mqttPrevConnected = false;
@@ -107,7 +110,7 @@ static void enterState(State s) {
             _servoASorting = false;
             _servoBSorting = false;
             _pending2L = 0;
-            _cameraHoldUntil = 0;
+            _cameraWaitingForDir = false;
             _cameraBlankUntil = 0;
             mqtt.publishStatus("IDLE");
             break;
@@ -121,8 +124,11 @@ static void enterState(State s) {
             s4.sync(); _s4Prev = s4.isDetected();
             s5.sync(); _s5Prev = s5.isDetected();
             s6.sync(); _s6Prev = s6.isDetected();
-            _cameraHoldUntil = 0;
+            _cameraWaitingForDir = false;
             _cameraBlankUntil = 0;
+            // 서보 분류 중이면 타임아웃 타이머 리셋 (PAUSED 동안 카운트 안함)
+            if (_servoASorting) _servoAStartMs = millis();
+            if (_servoBSorting) _servoBStartMs = millis();
             mqtt.publishStatus("RUNNING");
             break;
 
@@ -169,11 +175,45 @@ static void onCommand(const Command& cmd) {
         case CommandType::SORT_DIR_1L:
             _dirQueue.push(SortDir::LINE_1L);
             Serial.printf("[CMD] SORT_DIR queued: 1L (queue=%d)\n", (int)_dirQueue.size());
+            if (_cameraWaitingForDir) {
+                _cameraWaitingForDir = false;
+                _cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
+                s6.sync(); _s6Prev = s6.isDetected();
+                _s1Prev = false;
+                _s2Prev = false;
+                if (fsm.state() == State::RUNNING) dcMotor.drive(_dcSpeed);
+                Serial.println("[SENSOR] SORT_DIR → camera wait released");
+            }
             break;
 
         case CommandType::SORT_DIR_2L:
             _dirQueue.push(SortDir::LINE_2L);
             Serial.printf("[CMD] SORT_DIR queued: 2L (queue=%d)\n", (int)_dirQueue.size());
+            if (_cameraWaitingForDir) {
+                _cameraWaitingForDir = false;
+                _cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
+                s6.sync(); _s6Prev = s6.isDetected();
+                _s1Prev = false;
+                _s2Prev = false;
+                if (fsm.state() == State::RUNNING) dcMotor.drive(_dcSpeed);
+                Serial.println("[SENSOR] SORT_DIR → camera wait released");
+            }
+            break;
+
+        case CommandType::DC_SPEED:
+            _dcSpeed = constrain(cmd.value, 150, 255);
+            if (fsm.state() == State::RUNNING) dcMotor.drive(_dcSpeed);
+            Serial.printf("[CMD] DC_SPEED=%d\n", _dcSpeed);
+            break;
+
+        case CommandType::SERVO_DEG_A:
+            _sortDegA = constrain(cmd.value, 0, 45);
+            Serial.printf("[CMD] SERVO_A=%d\n", _sortDegA);
+            break;
+
+        case CommandType::SERVO_DEG_B:
+            _sortDegB = constrain(cmd.value, 0, 45);
+            Serial.printf("[CMD] SERVO_B=%d\n", _sortDegB);
             break;
 
         default:
@@ -181,21 +221,20 @@ static void onCommand(const Command& cmd) {
     }
 }
 
-// ── 카메라 위치 센서 (S6 → QR 인식용 일시정지) ──────────────
+// ── 카메라 위치 센서 (S6 → QR 인식용 SORT_DIR 대기) ─────────
 static void handleCameraDetect() {
-    if (fsm.state() != State::RUNNING) return;
+    if (fsm.state() == State::IDLE) return;
 
     unsigned long now = millis();
 
-    // 카메라 홀드 중 → S6 무시, 타임아웃만 체크
-    if (_cameraHoldUntil > 0) {
-        if (now >= _cameraHoldUntil) {
-            dcMotor.drive(_dcSpeed);
-            _cameraHoldUntil = 0;
-            // 홀드 후 S6 블랭킹: 플로팅 핀 재트리거 방지
+    // SORT_DIR 대기 중 → safety timeout만 체크
+    if (_cameraWaitingForDir) {
+        if (now - _cameraWaitStart >= config::timing::CAMERA_WAIT_MAX_MS) {
+            _cameraWaitingForDir = false;
             _cameraBlankUntil = now + config::timing::CAMERA_BLANK_MS;
             s6.sync(); _s6Prev = s6.isDetected();
-            Serial.println("[SENSOR] Camera hold released → blanking");
+            if (fsm.state() == State::RUNNING) dcMotor.drive(_dcSpeed);
+            Serial.println("[SENSOR] Camera wait TIMEOUT → force resume + blanking");
         }
         return;
     }
@@ -211,20 +250,28 @@ static void handleCameraDetect() {
         return;
     }
 
-    // S6 상승에지 → DC 모터 일시정지
+    // S6 상승에지 → DC 정지, SORT_DIR 수신 대기 시작
     bool det6 = s6.isDetected();
     if (det6 && !_s6Prev) {
         dcMotor.brake();
-        _cameraHoldUntil = now + config::timing::CAMERA_HOLD_MS;
+        _cameraWaitingForDir = true;
+        _cameraWaitStart = now;
         mqtt.publish(config::mqtt::TOPIC_SENSOR, "CAMERA_DETECT");
-        Serial.println("[SENSOR] S6 → camera hold");
+        Serial.println("[SENSOR] S6 → waiting for SORT_DIR");
     }
     _s6Prev = det6;
 }
 
 // ── 분류위치 센서 (S1/S2 → 서보 시작) ────────────────────────
 static void handleSortTrigger() {
-    if (fsm.state() != State::RUNNING) return;
+    if (fsm.state() == State::IDLE) return;
+
+    // 카메라 대기 중 → 센서 추적만 (DC 정지 상태 ADC 노이즈 false trigger 방지)
+    if (_cameraWaitingForDir) {
+        _s1Prev = s1.isDetected();
+        _s2Prev = s2.isDetected();
+        return;
+    }
 
     bool det1 = s1.isDetected();
     bool det2 = s2.isDetected();
@@ -237,7 +284,7 @@ static void handleSortTrigger() {
 
             if (dir == SortDir::LINE_1L) {
                 // 1L → servoA 즉시 동작
-                servoA.sort(config::servo::SORT_DEG_A);
+                servoA.sort(_sortDegA);
                 _servoASorting = true;
                 _servoAStartMs = millis();
                 mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTING_1L");
@@ -258,7 +305,7 @@ static void handleSortTrigger() {
     if (det2 && !_s2Prev) {
         if (_pending2L > 0) {
             _pending2L--;
-            servoB.sort(config::servo::SORT_DEG_B);
+            servoB.sort(_sortDegB);
             _servoBSorting = true;
             _servoBStartMs = millis();
             mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTING_2L");
@@ -272,7 +319,14 @@ static void handleSortTrigger() {
 
 // ── 확인 센서 + 서보 복귀 (S3/S4 → 서보 center + SORTED 발행) ──
 static void handleServoConfirm() {
-    if (fsm.state() == State::IDLE || fsm.state() == State::PAUSED) {
+    if (fsm.state() == State::IDLE) {
+        _s3Prev = s3.isDetected();
+        _s4Prev = s4.isDetected();
+        return;
+    }
+
+    // PAUSED 상태 → 센서 추적만 (서보 복귀/타임아웃 정지)
+    if (fsm.state() == State::PAUSED) {
         _s3Prev = s3.isDetected();
         _s4Prev = s4.isDetected();
         return;
@@ -300,7 +354,7 @@ static void handleServoConfirm() {
     _s3Prev = det3;
     _s4Prev = det4;
 
-    // Safety timeout: 확인 센서 미응답 시 강제 복귀
+    // Safety timeout: RUNNING 상태에서만 2초 후 강제 복귀
     unsigned long now = millis();
     if (_servoASorting && (now - _servoAStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
         servoA.center();
@@ -316,7 +370,7 @@ static void handleServoConfirm() {
 
 // ── 미분류 센서 (S5 → SORTED_UNCLASSIFIED 발행) ────────────────
 static void handleUnclassified() {
-    if (fsm.state() == State::IDLE || fsm.state() == State::PAUSED) {
+    if (fsm.state() == State::IDLE) {
         _s5Prev = s5.isDetected();
         return;
     }
@@ -357,7 +411,7 @@ void setup() {
     s3.begin(config::pin::SORT_CONFIRM_1L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s4.begin(config::pin::SORT_CONFIRM_2L, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s5.begin(config::pin::SORT_CONFIRM_UNCL, config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
-    s6.begin(config::pin::CAMERA_DETECT, 0, config::sensor::DEBOUNCE_MS, true, true);  // 디지털 모드, Active-Low 적용
+    s6.begin(config::pin::CAMERA_DETECT, 0, config::sensor::DEBOUNCE_S6_MS, true, true);  // 디지털 모드, Active-Low, 빠른 디바운스
 
     // WiFi
     wifi_manager::connect();

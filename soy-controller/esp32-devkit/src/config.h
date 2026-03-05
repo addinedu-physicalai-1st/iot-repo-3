@@ -48,7 +48,7 @@ namespace dc {
 namespace servo {
     constexpr int INIT_DEG   =  0;    // 업로드/재연결 시 초기화 각도
     constexpr int CENTER_DEG =  0;    // 중립 (통과)
-    constexpr int SORT_DEG_A = 35;    // 1L 분류 위치 (servoA)
+    constexpr int SORT_DEG_A = 40;    // 1L 분류 위치 (servoA)
     constexpr int SORT_DEG_B = 35;    // 2L 분류 위치 (servoB)
     constexpr int MIN_US     = 544;
     constexpr int MAX_US     = 2400;
@@ -60,12 +60,13 @@ namespace sensor {
     constexpr int           THRESHOLD   = 600;    // 이 값 이상 → 감지
     constexpr int           THRESHOLD_S6 = 3600;  // S6(카메라) 전용 임계값
     constexpr unsigned long DEBOUNCE_MS = 50;
+    constexpr unsigned long DEBOUNCE_S6_MS = 10;  // S6(디지털) 전용 — 빠른 응답
 }
 
 // ── 분류 / 타이밍 ────────────────────────────────────────────
 namespace timing {
-    constexpr unsigned long SORT_SAFETY_TIMEOUT_MS = 5000;  // 확인 센서 미응답 시 안전 복귀
-    constexpr unsigned long CAMERA_HOLD_MS = 500;           // 카메라 QR 인식용 일시정지 시간
+    constexpr unsigned long SORT_SAFETY_TIMEOUT_MS = 2000;  // 확인 센서 미응답 시 안전 복귀 (RUNNING 상태 기준)
+    constexpr unsigned long CAMERA_WAIT_MAX_MS = 5000;       // 카메라 QR → SORT_DIR 최대 대기 시간
     constexpr unsigned long CAMERA_BLANK_MS = 2000;         // 카메라 홀드 해제 후 S6 무시 시간
 }
 

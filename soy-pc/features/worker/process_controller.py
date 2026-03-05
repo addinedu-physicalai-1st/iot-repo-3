@@ -115,7 +115,9 @@ class ProcessState:
     order_items: list[dict] = field(default_factory=list)
     sort_queue: deque[str] = field(default_factory=deque)
     process_data: dict | None = None  # 서버에서 가져온 공정 dict 캐시
-    pending_items: list[tuple[str, str]] = field(default_factory=list)  # (item_code, direction)
+    pending_items: list[tuple[str, str]] = field(
+        default_factory=list
+    )  # (item_code, direction)
     station_1l_active: bool = False
     station_2l_active: bool = False
 
@@ -259,6 +261,9 @@ class ProcessController:
             self._handle_detected()
         elif event == SensorEvent.SORTING_1L:
             self._state.station_1l_active = True
+            # sort_queue 소비 (1L은 DETECTED 없이 SORTING_1L만 발행됨)
+            if self._state.sort_queue:
+                self._state.sort_queue.popleft()
             self._cb.on_sorting_started("1L")
         elif event == SensorEvent.SORTING_2L:
             self._state.station_2l_active = True
@@ -292,11 +297,7 @@ class ProcessController:
 
     def handle_qr(self, item_code: str | None) -> None:
         """QR 인식 결과 → 즉시 SORT_DIR 발행 + 큐 기록 + 대기 목록 갱신.
-        CAMERA_DETECT 수신 후 1회만 처리 (게이트 방식)."""
-        if not self._qr_gate_open:
-            logger.debug("[QR] Gate closed, ignoring: %s", item_code)
-            return
-        self._qr_gate_open = False  # 1회 처리 후 게이트 닫기
+        게이트 없이 QR 인식 즉시 처리."""
 
         if item_code is None or not item_code.strip():
             self._state.sort_queue.append(SortDirection.WARN.value)

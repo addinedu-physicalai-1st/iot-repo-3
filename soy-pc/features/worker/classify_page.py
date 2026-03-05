@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QTableWidgetItem,
 )
@@ -17,9 +19,11 @@ from PyQt6.QtWidgets import (
 from api import list_processes, process_update, list_inventory
 from features.worker.threads import UdpCameraThread, MqttSignalBridge
 from features.worker.inbound_dialog import parse_qr_payload
+from mqtt_client import mqtt_client
 from features.worker.process_controller import (
     FsmState,
     ProcessController,
+    TOPIC_CONTROL,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,9 +48,13 @@ _STATION_ACTIVE_STYLE = (
     "QFrame { background: #e8f4fd; border: 2px solid #3498db; border-radius: 8px; }"
 )
 _STATION_DOT_IDLE = "color: #aaa; font-size: 16px; border: none;"
-_STATION_DOT_ACTIVE = "color: #3498db; font-size: 16px; font-weight: bold; border: none;"
+_STATION_DOT_ACTIVE = (
+    "color: #3498db; font-size: 16px; font-weight: bold; border: none;"
+)
 _STATION_LABEL_IDLE = "color: #888; font-size: 12px; border: none;"
-_STATION_LABEL_ACTIVE = "color: #3498db; font-size: 12px; font-weight: bold; border: none;"
+_STATION_LABEL_ACTIVE = (
+    "color: #3498db; font-size: 12px; font-weight: bold; border: none;"
+)
 
 WAREHOUSE_TOTAL = 10  # 창고 현황 총량 기준
 
@@ -133,8 +141,65 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     stations_row.addStretch()
     info_layout.addLayout(stations_row)
 
+    # ── DC 속도 / 서보 각도 컨트롤 ──────────────────────────────
+    ctrl_row = QHBoxLayout()
+    ctrl_row.setSpacing(12)
+
+    # DC 속도
+    dc_label = QLabel("DC 속도:")
+    dc_label.setStyleSheet("font-size: 12px; border: none;")
+    dc_spin = QSpinBox()
+    dc_spin.setRange(150, 255)
+    dc_spin.setValue(180)
+    dc_spin.setFixedWidth(60)
+    dc_apply_btn = QPushButton("적용")
+    dc_apply_btn.setFixedWidth(50)
+
+    def _on_dc_apply():
+        mqtt_client.publish(TOPIC_CONTROL, f"DC_SPEED:{dc_spin.value()}")
+
+    dc_apply_btn.clicked.connect(_on_dc_apply)
+
+    ctrl_row.addWidget(dc_label)
+    ctrl_row.addWidget(dc_spin)
+    ctrl_row.addWidget(dc_apply_btn)
+
+    # 서보A 각도
+    servo_a_label = QLabel("서보A:")
+    servo_a_label.setStyleSheet("font-size: 12px; border: none;")
+    servo_a_spin = QSpinBox()
+    servo_a_spin.setRange(0, 45)
+    servo_a_spin.setValue(40)
+    servo_a_spin.setFixedWidth(60)
+    servo_a_spin.setSuffix("\u00b0")
+    servo_a_spin.valueChanged.connect(
+        lambda val: mqtt_client.publish(TOPIC_CONTROL, f"SERVO_A:{val}")
+    )
+
+    ctrl_row.addWidget(servo_a_label)
+    ctrl_row.addWidget(servo_a_spin)
+
+    # 서보B 각도
+    servo_b_label = QLabel("서보B:")
+    servo_b_label.setStyleSheet("font-size: 12px; border: none;")
+    servo_b_spin = QSpinBox()
+    servo_b_spin.setRange(0, 45)
+    servo_b_spin.setValue(35)
+    servo_b_spin.setFixedWidth(60)
+    servo_b_spin.setSuffix("\u00b0")
+    servo_b_spin.valueChanged.connect(
+        lambda val: mqtt_client.publish(TOPIC_CONTROL, f"SERVO_B:{val}")
+    )
+
+    ctrl_row.addWidget(servo_b_label)
+    ctrl_row.addWidget(servo_b_spin)
+    ctrl_row.addStretch()
+    info_layout.addLayout(ctrl_row)
+
     # ── 컨베이어 흐름 표시 ─────────────────────────────────────
-    flow_label = QLabel("\u25b6QR \u2550\u2550\u25b6 S1 \u2550\u2550\u25b6 S2 \u2550\u2550\u25b6 \ubbf8\ubd84\ub958")
+    flow_label = QLabel(
+        "\u25b6QR \u2550\u2550\u25b6 S1 \u2550\u2550\u25b6 S2 \u2550\u2550\u25b6 \ubbf8\ubd84\ub958"
+    )
     flow_label.setStyleSheet(
         "font-size: 12px; color: #777; font-family: monospace; border: none;"
     )
@@ -356,6 +421,9 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         _update_pending_list([])
         warning_label.setText("경고: (없음)")
         warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
+        dc_spin.setValue(180)
+        servo_a_spin.setValue(40)
+        servo_b_spin.setValue(35)
 
     # ── 공정 목록 갱신 ───────────────────────────────────────────
     def _refresh_classify_list():
@@ -516,22 +584,31 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
             worker.classifyPauseButton.setEnabled(True)
             worker.classifyPauseButton.setText("일시정지")
             worker.classifyStopButton.setEnabled(True)
+            servo_a_spin.setEnabled(False)
+            servo_b_spin.setEnabled(False)
         elif is_active and state == "PAUSED":
             worker.classifyStartButton.setEnabled(False)
             worker.classifyPauseButton.setEnabled(True)
             worker.classifyPauseButton.setText("재개")
             worker.classifyStopButton.setEnabled(True)
+            servo_a_spin.setEnabled(True)
+            servo_b_spin.setEnabled(True)
         else:
             # IDLE 또는 공정 미활성
             row = worker.processTable.currentRow()
             item0 = worker.processTable.item(row, 0) if row >= 0 else None
             pid = item0.data(Qt.ItemDataRole.UserRole) if item0 else None
             running = next(
-                (p for p in _classify_processes if (p.get("status") or "").upper() == "RUNNING"),
+                (
+                    p
+                    for p in _classify_processes
+                    if (p.get("status") or "").upper() == "RUNNING"
+                ),
                 None,
             )
             is_selected_running = (
-                pid is not None and running is not None
+                pid is not None
+                and running is not None
                 and running.get("process_id") == pid
             )
             if is_selected_running:
@@ -544,6 +621,8 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
                 worker.classifyStopButton.setEnabled(False)
             worker.classifyPauseButton.setEnabled(False)
             worker.classifyPauseButton.setText("일시정지")
+            servo_a_spin.setEnabled(True)
+            servo_b_spin.setEnabled(True)
 
     def _classify_update_toggle_button():
         _update_buttons()
