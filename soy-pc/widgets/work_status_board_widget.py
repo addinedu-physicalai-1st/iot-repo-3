@@ -335,7 +335,12 @@ class WorkStatusBoardWidget(QWidget):
         if not detail:
             return
 
-        lines = [ln for ln in detail.splitlines() if ln.strip()]
+        # 빈 줄을 보존해서 "주문 물품"과 "에러 물품" 섹션을 시각적으로 분리
+        lines = detail.splitlines()
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
         # 첫 줄(Order #id)은 이미 카드 제목으로 보이므로 상세 블럭에서는 제거
         if lines and lines[0].strip().lower() == item.text().strip().lower():
             lines = lines[1:]

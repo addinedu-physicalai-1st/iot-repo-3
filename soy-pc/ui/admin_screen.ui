@@ -151,7 +151,7 @@
          </font>
         </property>
         <property name="text">
-         <string>작업 현장</string>
+         <string>작업 현황</string>
         </property>
         <property name="checkable">
          <bool>true</bool>

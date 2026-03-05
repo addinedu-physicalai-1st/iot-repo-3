@@ -147,7 +147,13 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     )
 
     # 재고 리포트: 도넛 차트 위젯
-    from PyQt6.QtWidgets import QVBoxLayout
+    from PyQt6.QtWidgets import (
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QPushButton,
+        QVBoxLayout,
+    )
     inventory_chart = DonutChartWidget(admin.inventoryChartContainer)
     layout = QVBoxLayout(admin.inventoryChartContainer)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -177,6 +183,55 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     admin.itemSearchCheckBox.toggled.connect(admin.itemSearchEdit.setEnabled)
     admin.dateSearchCheckBox.toggled.connect(admin.startDateEdit.setEnabled)
     admin.dateSearchCheckBox.toggled.connect(admin.endDateEdit.setEnabled)
+    page_size = 20
+    access_logs_cache: list[dict] = []
+    item_logs_cache: list[dict] = []
+    access_page = 1
+    item_page = 1
+
+    access_pager = QHBoxLayout()
+    access_pager.setSpacing(6)
+    access_prev_btn = QPushButton("이전")
+    access_prev_btn.setMinimumHeight(34)
+    access_page_label = QLabel("")
+    access_page_input = QLineEdit()
+    access_page_input.setPlaceholderText("페이지")
+    access_page_input.setFixedWidth(72)
+    access_go_btn = QPushButton("이동")
+    access_go_btn.setMinimumHeight(34)
+    access_next_btn = QPushButton("다음")
+    access_next_btn.setMinimumHeight(34)
+    access_pager.addStretch(1)
+    access_pager.addWidget(access_prev_btn)
+    access_pager.addWidget(access_page_label)
+    access_pager.addWidget(access_page_input)
+    access_pager.addWidget(access_go_btn)
+    access_pager.addWidget(access_next_btn)
+    access_pager.addStretch(1)
+    # title(0) + search(1) + table(2) 바로 아래(3)
+    admin.page_access_log.layout().insertLayout(3, access_pager)
+
+    item_pager = QHBoxLayout()
+    item_pager.setSpacing(6)
+    item_prev_btn = QPushButton("이전")
+    item_prev_btn.setMinimumHeight(34)
+    item_page_label = QLabel("")
+    item_page_input = QLineEdit()
+    item_page_input.setPlaceholderText("페이지")
+    item_page_input.setFixedWidth(72)
+    item_go_btn = QPushButton("이동")
+    item_go_btn.setMinimumHeight(34)
+    item_next_btn = QPushButton("다음")
+    item_next_btn.setMinimumHeight(34)
+    item_pager.addStretch(1)
+    item_pager.addWidget(item_prev_btn)
+    item_pager.addWidget(item_page_label)
+    item_pager.addWidget(item_page_input)
+    item_pager.addWidget(item_go_btn)
+    item_pager.addWidget(item_next_btn)
+    item_pager.addStretch(1)
+    # title(0) + filter(1) + table(2) 바로 아래(3)
+    admin.page_item_sorting_log.layout().insertLayout(3, item_pager)
 
     def _format_created_at(created_at: str) -> str:
         """API created_at (ISO) → 날짜만 표시 (YYYY-MM-DD)."""
@@ -192,18 +247,51 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
             return checked_at[:19].replace("T", " ")
         return checked_at
 
-    def refresh_access_logs():
-        search_text = admin.accessLogSearchEdit.text().strip() if admin.accessLogSearchEdit else ""
-        worker_name_filter = search_text if search_text else None
+    def _pagination_meta(total_count: int, current_page: int) -> tuple[int, int]:
+        if total_count <= 0:
+            return (0, 0)
+        total_pages = (total_count + page_size - 1) // page_size
+        page = max(1, min(current_page, total_pages))
+        return (page, total_pages)
+
+    def _parse_page(text: str, total_pages: int) -> int | None:
         try:
-            logs = list_access_logs(worker_name=worker_name_filter)
-        except (TimeoutError, RuntimeError, OSError, ConnectionError):
-            admin.accessLogTable.setRowCount(0)
-            return
+            n = int((text or "").strip())
+        except ValueError:
+            return None
+        if total_pages <= 0:
+            return None
+        return max(1, min(n, total_pages))
+
+    def _fit_table_height(table, visible_rows: int) -> None:
+        """페이지 컨트롤이 표 바로 아래에 오도록 테이블 높이를 행 수에 맞춤."""
+        rows = max(1, int(visible_rows))
+        header_h = table.horizontalHeader().height()
+        frame = table.frameWidth() * 2
+        row_h = table.verticalHeader().defaultSectionSize()
+        total_h = header_h + (row_h * rows) + frame + 4
+        table.setMinimumHeight(total_h)
+        table.setMaximumHeight(total_h)
+
+    def _render_access_logs_page():
+        nonlocal access_page
         admin.accessLogTable.setRowCount(0)
-        for entry in logs:
+        page, total_pages = _pagination_meta(len(access_logs_cache), access_page)
+        if page == 0:
+            access_page_label.setText("0 / 0 (총 0건)")
+            access_prev_btn.setEnabled(False)
+            access_next_btn.setEnabled(False)
+            _fit_table_height(admin.accessLogTable, 1)
+            return
+        access_page = page
+        start = (access_page - 1) * page_size
+        rows = access_logs_cache[start : start + page_size]
+        for entry in rows:
             row = admin.accessLogTable.rowCount()
             admin.accessLogTable.insertRow(row)
+            admin.accessLogTable.setVerticalHeaderItem(
+                row, QTableWidgetItem(str(start + row + 1))
+            )
             admin.accessLogTable.setItem(
                 row, 0, QTableWidgetItem(entry.get("worker_name", ""))
             )
@@ -215,8 +303,67 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                 2,
                 QTableWidgetItem(_format_checked_at(entry.get("checked_at", ""))),
             )
+        access_page_label.setText(f"{access_page} / {total_pages} (총 {len(access_logs_cache)}건)")
+        access_prev_btn.setEnabled(access_page > 1)
+        access_next_btn.setEnabled(access_page < total_pages)
+        _fit_table_height(admin.accessLogTable, len(rows))
 
-    def refresh_item_sorting_logs():
+    def _render_item_sorting_logs_page():
+        nonlocal item_page
+        admin.itemSortingLogTable.setRowCount(0)
+        page, total_pages = _pagination_meta(len(item_logs_cache), item_page)
+        if page == 0:
+            item_page_label.setText("0 / 0 (총 0건)")
+            item_prev_btn.setEnabled(False)
+            item_next_btn.setEnabled(False)
+            _fit_table_height(admin.itemSortingLogTable, 1)
+            return
+        item_page = page
+        start = (item_page - 1) * page_size
+        rows = item_logs_cache[start : start + page_size]
+        for entry in rows:
+            row = admin.itemSortingLogTable.rowCount()
+            admin.itemSortingLogTable.insertRow(row)
+            admin.itemSortingLogTable.setVerticalHeaderItem(
+                row, QTableWidgetItem(str(start + row + 1))
+            )
+            admin.itemSortingLogTable.setItem(
+                row, 0, QTableWidgetItem(entry.get("product_name", ""))
+            )
+            admin.itemSortingLogTable.setItem(
+                row, 1, QTableWidgetItem(entry.get("box_qr_code", "") or "")
+            )
+            is_error = entry.get("is_error", False)
+            status_text = "오류" if is_error else "정상"
+            admin.itemSortingLogTable.setItem(row, 2, QTableWidgetItem(status_text))
+            admin.itemSortingLogTable.setItem(
+                row,
+                3,
+                QTableWidgetItem(_format_checked_at(entry.get("timestamp", ""))),
+            )
+        item_page_label.setText(f"{item_page} / {total_pages} (총 {len(item_logs_cache)}건)")
+        item_prev_btn.setEnabled(item_page > 1)
+        item_next_btn.setEnabled(item_page < total_pages)
+        _fit_table_height(admin.itemSortingLogTable, len(rows))
+
+    def refresh_access_logs(reset_page: bool = True):
+        nonlocal access_logs_cache, access_page
+        search_text = admin.accessLogSearchEdit.text().strip() if admin.accessLogSearchEdit else ""
+        worker_name_filter = search_text if search_text else None
+        try:
+            logs = list_access_logs(worker_name=worker_name_filter)
+        except (TimeoutError, RuntimeError, OSError, ConnectionError):
+            access_logs_cache = []
+            access_page = 1
+            _render_access_logs_page()
+            return
+        access_logs_cache = logs or []
+        if reset_page:
+            access_page = 1
+        _render_access_logs_page()
+
+    def refresh_item_sorting_logs(reset_page: bool = True):
+        nonlocal item_logs_cache, item_page
         # 체크박스 상태에 따라 검색 조건 포함 여부 결정
         start_date = None
         end_date = None
@@ -234,24 +381,15 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
                 start_date=start_date, end_date=end_date, search_text=search_text
             )
         except (TimeoutError, RuntimeError, OSError, ConnectionError):
-            admin.itemSortingLogTable.setRowCount(0)
+            item_logs_cache = []
+            item_page = 1
+            _render_item_sorting_logs_page()
             return
 
-        admin.itemSortingLogTable.setRowCount(0)
-        for entry in logs:
-            row = admin.itemSortingLogTable.rowCount()
-            admin.itemSortingLogTable.insertRow(row)
-            admin.itemSortingLogTable.setItem(
-                row, 0, QTableWidgetItem(entry.get("product_name", ""))
-            )
-            is_error = entry.get("is_error", False)
-            status_text = "오류" if is_error else "정상"
-            admin.itemSortingLogTable.setItem(row, 2, QTableWidgetItem(status_text))
-            admin.itemSortingLogTable.setItem(
-                row,
-                3,
-                QTableWidgetItem(_format_checked_at(entry.get("timestamp", ""))),
-            )
+        item_logs_cache = logs or []
+        if reset_page:
+            item_page = 1
+        _render_item_sorting_logs_page()
 
     def refresh_workers():
         try:
@@ -623,12 +761,59 @@ def setup_admin_screen(window, stacked, ui_dir: str) -> None:
     admin.itemSortingLogSearchButton.clicked.connect(refresh_item_sorting_logs)
     admin.itemSearchEdit.returnPressed.connect(refresh_item_sorting_logs)
 
+    def on_access_prev():
+        nonlocal access_page
+        access_page = max(1, access_page - 1)
+        _render_access_logs_page()
+
+    def on_access_next():
+        nonlocal access_page
+        access_page += 1
+        _render_access_logs_page()
+
+    def on_item_prev():
+        nonlocal item_page
+        item_page = max(1, item_page - 1)
+        _render_item_sorting_logs_page()
+
+    def on_item_next():
+        nonlocal item_page
+        item_page += 1
+        _render_item_sorting_logs_page()
+
+    def on_access_go():
+        nonlocal access_page
+        _page, total_pages = _pagination_meta(len(access_logs_cache), access_page)
+        target = _parse_page(access_page_input.text(), total_pages)
+        if target is None:
+            return
+        access_page = target
+        _render_access_logs_page()
+
+    def on_item_go():
+        nonlocal item_page
+        _page, total_pages = _pagination_meta(len(item_logs_cache), item_page)
+        target = _parse_page(item_page_input.text(), total_pages)
+        if target is None:
+            return
+        item_page = target
+        _render_item_sorting_logs_page()
+
+    access_prev_btn.clicked.connect(on_access_prev)
+    access_next_btn.clicked.connect(on_access_next)
+    access_go_btn.clicked.connect(on_access_go)
+    access_page_input.returnPressed.connect(on_access_go)
+    item_prev_btn.clicked.connect(on_item_prev)
+    item_next_btn.clicked.connect(on_item_next)
+    item_go_btn.clicked.connect(on_item_go)
+    item_page_input.returnPressed.connect(on_item_go)
+
     def on_access_log_search():
-        refresh_access_logs()
+        refresh_access_logs(reset_page=True)
 
     def on_access_log_clear_filter():
         admin.accessLogSearchEdit.clear()
-        refresh_access_logs()
+        refresh_access_logs(reset_page=True)
 
     admin.accessLogSearchButton.clicked.connect(on_access_log_search)
     admin.accessLogClearFilterButton.clicked.connect(on_access_log_clear_filter)
