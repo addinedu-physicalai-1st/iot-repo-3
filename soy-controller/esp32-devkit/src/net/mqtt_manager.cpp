@@ -1,4 +1,4 @@
-#include "mqtt_manager.h"
+#include "net/mqtt_manager.h"
 #include "config.h"
 #include <Arduino.h>
 
@@ -57,7 +57,7 @@ void MqttManager::reconnect() {
 
     if (_mqtt.connect(clientId.c_str())) {
         Serial.println("OK");
-        _mqtt.subscribe(config::mqtt::TOPIC_CONTROL);
+        _mqtt.subscribe(config::mqtt::TOPIC_CONTROL, 1);  // QoS 1
     } else {
         Serial.printf("failed, rc=%d (retry in 5s)\n", _mqtt.state());
     }

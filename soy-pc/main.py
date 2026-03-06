@@ -1,5 +1,7 @@
+import atexit
 import logging
 import os
+import signal
 import sys
 import traceback
 
@@ -92,13 +94,32 @@ def main() -> None:
     # MQTT 브로커 연결 (IoT 제어)
     mqtt_client.connect()
 
+    # ── CleanShutdown 프로토콜 ─────────────────────────────────
+    # 프로그램 비정상 종료 시에도 ESP32에 SORT_STOP을 보내고 MQTT 정리
+    _shutdown_done = False
+
+    def _emergency_cleanup(*_args) -> None:
+        nonlocal _shutdown_done
+        if _shutdown_done:
+            return
+        _shutdown_done = True
+        try:
+            mqtt_client.publish("device/control", "SORT_STOP")
+        except Exception:
+            pass
+        mqtt_client.disconnect()
+
+    atexit.register(_emergency_cleanup)
+    signal.signal(signal.SIGTERM, lambda *_: (_emergency_cleanup(), sys.exit(0)))
+    # SIGINT는 KeyboardInterrupt로 처리되므로 atexit에서 커버됨
+
     window.show()
 
     while not ensure_admin_registered(ui_dir, window):
         pass
 
     exit_code = app.exec()
-    mqtt_client.disconnect()
+    _emergency_cleanup()  # 정상 종료 시에도 정리
     sys.exit(exit_code)
 
 

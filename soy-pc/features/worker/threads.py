@@ -42,6 +42,81 @@ def _try_decode_qr(pyzbar_mod, cv2, frame):
     return []
 
 
+# ── QR 블로킹 없는 독립 디코딩 워커 ──────────────────────────────
+class QRDecodeWorker(QThread):
+    """비동기 QR 디코딩을 처리하여 카메라 영상의 렉(백로그)을 방지."""
+
+    qr_decoded = pyqtSignal(str)
+
+    def __init__(self, pyzbar_mod, cv2_mod, parent=None):
+        super().__init__(parent)
+        self.pyzbar_mod = pyzbar_mod
+        self.cv2 = cv2_mod
+        self._running = False
+        import queue
+
+        self._queue = queue.Queue(maxsize=1)
+        self._last_decoded: str | None = None
+        self._cooldown_until: float = 0
+
+    def put_frame(self, frame):
+        import queue
+
+        try:
+            # 큐가 가득 찼으면 이전 프레임을 버리고 최신 프레임을 넣음
+            if self._queue.full():
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    pass
+            self._queue.put_nowait(frame)
+        except queue.Full:
+            pass
+
+    def run(self):
+        import time
+        import queue
+
+        self._running = True
+
+        while self._running:
+            try:
+                frame = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            now = time.monotonic()
+            if now < self._cooldown_until:
+                continue
+
+            if self.pyzbar_mod is None:
+                continue
+
+            decoded_list = _try_decode_qr(self.pyzbar_mod, self.cv2, frame)
+
+            for obj in decoded_list:
+                if obj.type != "QRCODE":
+                    continue
+                try:
+                    qr_data = obj.data.decode("utf-8", errors="strict").strip()
+                except Exception:
+                    continue
+                if qr_data and qr_data != self._last_decoded:
+                    self._last_decoded = qr_data
+                    self._cooldown_until = now + 1.0
+                    logger.info("[UdpCam] QR 발행: %s", qr_data)
+                    self.qr_decoded.emit(qr_data)
+                    break
+
+    def stop(self):
+        self._running = False
+        self.wait(1000)
+
+    def reset_cooldown(self):
+        self._cooldown_until = 0
+        self._last_decoded = None
+
+
 # ── ESP32-CAM UDP 스트림 수신 스레드 ─────────────────────────────
 class UdpCameraThread(QThread):
     """ESP32-CAM UDP 청크 스트림 수신 → JPEG 재조립 → QImage + QR 디코딩."""
@@ -55,8 +130,7 @@ class UdpCameraThread(QThread):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = False
-        self._last_decoded: str | None = None
-        self._cooldown_until: float = 0
+        self._decoder = None
 
     def run(self):
         import socket
@@ -87,6 +161,11 @@ class UdpCameraThread(QThread):
             buffers: dict[int, dict] = {}
             frame_count = 0
 
+            if pyzbar_mod is not None:
+                self._decoder = QRDecodeWorker(pyzbar_mod, cv2)
+                self._decoder.qr_decoded.connect(self.qr_decoded)
+                self._decoder.start()
+
             while self._running:
                 try:
                     data, _ = sock.recvfrom(65535)
@@ -116,11 +195,17 @@ class UdpCameraThread(QThread):
                 if len(buf["chunks"]) < buf["total"]:
                     continue
 
-                # 모든 청크 수신 완료 → JPEG 재조립
-                jpeg_data = b""
-                for i in range(buf["total"]):
-                    jpeg_data += buf["chunks"].get(i, b"")
-                del buffers[image_id]
+                # # 모든 청크 수신 완료 → JPEG 재조립
+                # jpeg_data = b""
+                # for i in range(buf["total"]):
+                #     jpeg_data += buf["chunks"].get(i, b"")
+                # del buffers[image_id]
+
+                # += 대신 join() 사용 : 메모리 재할당/복사 병목을 없애 스트리밍 디코딩 속도 향상
+                jpeg_data = b"".join(
+                    buf["chunks"].get(i, b"") for i in range(buf["total"])
+                )
+                del buffers[image_id]   
 
                 # JPEG 디코드
                 arr = np.frombuffer(jpeg_data, dtype=np.uint8)
@@ -133,37 +218,8 @@ class UdpCameraThread(QThread):
                 qimg = QImage(frame_rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
                 self.frame_ready.emit(qimg.copy())
 
-                frame_count += 1
-
-                # QR 디코딩 (pyzbar 사용 가능한 경우만, 2초 쿨다운)
-                if pyzbar_mod is None:
-                    continue
-                now = time.monotonic()
-                if now < self._cooldown_until:
-                    continue
-
-                decoded_list = _try_decode_qr(pyzbar_mod, cv2, frame)
-                if decoded_list and frame_count % 30 == 0:
-                    logger.info(
-                        "[UdpCam] QR 감지 %d개: %s",
-                        len(decoded_list),
-                        [o.data[:40] for o in decoded_list],
-                    )
-                for obj in decoded_list:
-                    if obj.type != "QRCODE":
-                        continue
-                    try:
-                        qr_data = obj.data.decode("utf-8", errors="strict").strip()
-                    except Exception:
-                        continue
-                    # 동일 QR 중복 방지: 같은 QR이 연속 감지되면 무시
-                    # reset_cooldown() (CAMERA_DETECT 수신 시) 호출로 _last_decoded 초기화 후 허용
-                    if qr_data and qr_data != self._last_decoded:
-                        self._last_decoded = qr_data
-                        self._cooldown_until = now + 1.0
-                        logger.info("[UdpCam] QR 발행: %s", qr_data)
-                        self.qr_decoded.emit(qr_data)
-                        break
+                if self._decoder is not None:
+                    self._decoder.put_frame(frame)
 
         except Exception as e:
             logger.exception("UdpCameraThread: %s", e)
@@ -174,11 +230,13 @@ class UdpCameraThread(QThread):
 
     def stop(self):
         self._running = False
+        if self._decoder:
+            self._decoder.stop()
 
     def reset_cooldown(self):
         """CAMERA_DETECT 수신 시 호출 — 쿨다운 초기화로 즉시 QR 디코딩 가능."""
-        self._cooldown_until = 0
-        self._last_decoded = None
+        if self._decoder:
+            self._decoder.reset_cooldown()
 
 
 # ── MQTT → Qt 시그널 브릿지 (스레드 안전) ────────────────────────

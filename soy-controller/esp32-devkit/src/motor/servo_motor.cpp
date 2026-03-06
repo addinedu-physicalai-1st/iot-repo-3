@@ -1,4 +1,4 @@
-#include "servo_motor.h"
+#include "motor/servo_motor.h"
 #include "config.h"
 #include <Arduino.h>
 #include "driver/mcpwm.h"

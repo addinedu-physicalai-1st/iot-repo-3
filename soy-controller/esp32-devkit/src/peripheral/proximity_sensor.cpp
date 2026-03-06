@@ -1,4 +1,4 @@
-#include "proximity_sensor.h"
+#include "peripheral/proximity_sensor.h"
 #include <Arduino.h>
 
 void ProximitySensor::begin(int pin, int threshold, unsigned long debounceMs, bool isDigital, bool activeLow) {
@@ -44,11 +44,15 @@ bool ProximitySensor::isDetected() {
     unsigned long now = millis();
 
     if (detected != _lastState) {
-        _lastState  = detected;
         _lastChange = now;
+        _lastState  = detected;
     }
 
-    return _lastState && (now - _lastChange >= _debounceMs);
+    if (now - _lastChange >= _debounceMs) {
+        _stableState = detected;
+    }
+
+    return _stableState;
 }
 
 void ProximitySensor::sync() {
@@ -58,6 +62,6 @@ void ProximitySensor::sync() {
     } else {
         _lastState = (raw >= _threshold);
     }
-    // _lastChange = 0 → debounce 조건 (millis() - 0 >= 50)이 항상 통과
+    _stableState = _lastState;
     _lastChange = 0;
 }

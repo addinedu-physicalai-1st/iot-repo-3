@@ -1,4 +1,4 @@
-#include "dc_motor.h"
+#include "motor/dc_motor.h"
 #include <Arduino.h>
 
 void DcMotor::begin(int in1Pin, int in2Pin, int channel, int freqHz, int resolutionBits) {

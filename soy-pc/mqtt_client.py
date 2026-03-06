@@ -11,6 +11,11 @@ MQTT 클라이언트 싱글톤 — soy-pc IoT 제어용.
   mqtt_client.publish("device/control", "DC_START:200")
   mqtt_client.subscribe("device/sensor", my_callback)
   mqtt_client.disconnect()
+
+MQTT QoS 정책:
+  device/control (PC→ESP32): QoS 1 — 명령 유실 방지 (SORT_DIR, SORT_STOP 등)
+  device/sensor  (ESP→PC):   QoS 0 — PubSubClient 발행 제약 (ESP32 라이브러리)
+  device/status  (ESP→PC):   QoS 0 — 재연결 시 재발행으로 보완
 """
 
 import logging
@@ -22,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 _BROKER_HOST = os.environ.get("MQTT_BROKER_HOST", "127.0.0.1")
 _BROKER_PORT = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
+
+# 토픽별 QoS 정책
+_TOPIC_QOS: dict[str, int] = {
+    "device/control": 1,  # PC→ESP32 명령: QoS 1 (at-least-once)
+}
+_DEFAULT_QOS = 0  # 기본: QoS 0 (best-effort)
 
 
 class MqttClient:
@@ -79,8 +90,9 @@ class MqttClient:
                 "[MQTT] publish skipped (not connected): %s %s", topic, payload
             )
             return
-        c.publish(topic, payload, qos=0)
-        logger.debug("[MQTT] >> %s : %s", topic, payload)
+        qos = _TOPIC_QOS.get(topic, _DEFAULT_QOS)
+        c.publish(topic, payload, qos=qos)
+        logger.debug("[MQTT] >> %s : %s (qos=%d)", topic, payload, qos)
 
     def subscribe(self, topic: str, callback: Callable[[str, str], None]) -> None:
         """토픽 구독. callback(topic, payload) 형태. 동일 토픽에 복수 콜백 등록 가능."""
@@ -91,8 +103,9 @@ class MqttClient:
         with self._lock:
             c = self._client
         if c and self._connected:
-            c.subscribe(topic, qos=0)
-            logger.info("[MQTT] subscribed %s", topic)
+            qos = _TOPIC_QOS.get(topic, _DEFAULT_QOS)
+            c.subscribe(topic, qos=qos)
+            logger.info("[MQTT] subscribed %s (qos=%d)", topic, qos)
 
     # ── paho 콜백 ────────────────────────────────────────────────────
     def _on_connect(
@@ -103,7 +116,8 @@ class MqttClient:
             logger.info("[MQTT] connected")
             # 재연결 시 기존 구독 복원
             for topic in self._subscriptions:
-                client.subscribe(topic, qos=0)
+                qos = _TOPIC_QOS.get(topic, _DEFAULT_QOS)
+                client.subscribe(topic, qos=qos)
         else:
             logger.warning("[MQTT] connection refused, reason=%s", reason_code)
 

@@ -1,8 +1,14 @@
 """
-공정 생명주기 제어 — MQTT 명령 발행 + TCP DB 업데이트 + 자동 완료 판단.
+공정 생명주기 제어 — State 디자인패턴 + 독립 분류기 + QR 3단 필터.
 
-GUI 코드와 분리된 비즈니스 로직 전담 모듈.
-worker_screen.py 에서 콜백(ProcessCallbacks)으로 UI 업데이트를 위임한다.
+아키텍처:
+  - ProcessStateBase(states/base.py): 상태 인터페이스
+  - IdleState / ActiveState / PausedState: 구체 상태
+  - ClassifierBase(classifier.py): 분류 결정 (FSM 무관)
+  - QrGate(qr_gate.py): QR 중복 방지 3단 필터 (FSM 무관)
+  - ProcessController: 상태 전이 + 이벤트 위임
+
+GUI 코드와 분리. classify_page.py에서 콜백(ProcessCallbacks)으로 UI 업데이트를 위임.
 """
 
 import json
@@ -21,6 +27,12 @@ from api import (
     process_stop as api_process_stop,
     process_update as api_process_update,
 )
+from features.worker.classifier import (
+    ClassifierBase,
+    SortDirection,
+    SuffixClassifier,
+)
+from features.worker.qr_gate import QrGate, QrRejectReason, MAX_SORT_QUEUE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +61,6 @@ class FsmState(str, Enum):
             return cls(name)
         except ValueError:
             return None
-
-
-class SortDirection(str, Enum):
-    """분류 방향."""
-
-    LINE_1L = "1L"
-    LINE_2L = "2L"
-    WARN = "WARN"
 
 
 class SensorEvent(str, Enum):
@@ -114,10 +118,8 @@ class ProcessState:
     process_id: int | None = None
     order_items: list[dict] = field(default_factory=list)
     sort_queue: deque[str] = field(default_factory=deque)
-    process_data: dict | None = None  # 서버에서 가져온 공정 dict 캐시
-    pending_items: list[tuple[str, str]] = field(
-        default_factory=list
-    )  # (item_code, direction)
+    process_data: dict | None = None
+    pending_items: list[tuple[str, str]] = field(default_factory=list)
     station_1l_active: bool = False
     station_2l_active: bool = False
 
@@ -126,6 +128,7 @@ class ProcessState:
         return self.process_id is not None
 
     def reset(self) -> None:
+        """모든 상태 완전 초기화 — CleanShutdown."""
         self.process_id = None
         self.order_items = []
         self.sort_queue.clear()
@@ -137,74 +140,47 @@ class ProcessState:
 
 # ── 컨트롤러 ─────────────────────────────────────────────────
 class ProcessController:
-    """공정 생명주기 관리 — GUI와 분리된 비즈니스 로직."""
+    """공정 생명주기 관리 — State 디자인패턴.
 
-    _WATCHDOG_INTERVAL_S = 10.0  # Watchdog 최소 재전송 간격
+    이벤트(handle_qr, handle_sensor, handle_status)를
+    현재 상태 객체에 위임한다.
+    """
 
-    def __init__(self, callbacks: ProcessCallbacks) -> None:
+    _WATCHDOG_INTERVAL_S = 10.0
+
+    def __init__(
+        self,
+        callbacks: ProcessCallbacks,
+        classifier: ClassifierBase | None = None,
+    ) -> None:
         self._cb = callbacks
         self._state = ProcessState()
         self._last_watchdog_ts: float = 0.0
-        self._qr_gate_open: bool = False
 
-    # ── 공정 시작/중지 ────────────────────────────────────────
+        # 독립 모듈
+        self._classifier: ClassifierBase = classifier or SuffixClassifier()
+        self._qr_gate = QrGate()
 
-    def start(self, process_data: dict) -> None:
-        """공정 시작. process_data는 서버에서 가져온 공정 dict."""
-        pid = int(process_data["process_id"])
-        try:
-            api_process_start(pid)
-        except (RuntimeError, TimeoutError, OSError, ConnectionError) as e:
-            self._cb.on_error(f"공정 시작 실패: {e}")
-            return
+        # State 패턴: 상태 인스턴스 생성
+        from features.worker.states import IdleState, ActiveState, PausedState
 
-        self._state.reset()
-        self._state.process_id = pid
-        self._state.process_data = process_data
-        self._qr_gate_open = False
+        self._idle_state = IdleState()
+        self._active_state = ActiveState()
+        self._paused_state = PausedState()
 
-        # 주문 품목 캐시
-        order_id = process_data.get("order_id")
-        if order_id:
-            self._state.order_items = self._fetch_order_items(int(order_id))
+        # 초기 상태: IDLE
+        self._current_state = self._idle_state
 
-        mqtt_client.publish(TOPIC_CONTROL, "SORT_START")
-        self._cb.on_process_started(pid)
-        logger.info(
-            "[공정시작] pid=%s, items=%s",
-            pid,
-            [it.get("item_code") for it in self._state.order_items],
-        )
+    # ── 상태 전이 ─────────────────────────────────────────────
 
-    def pause(self) -> None:
-        """공정 일시정지. DB 상태는 RUNNING 유지, ESP32만 PAUSED."""
-        if not self._state.is_active:
-            return
-        mqtt_client.publish(TOPIC_CONTROL, "SORT_PAUSE")
-        self._cb.on_process_paused()
-        logger.info("[공정일시정지] pid=%s", self._state.process_id)
+    def _transition_to(self, new_state) -> None:
+        """상태 전이. 현재 상태 on_exit → 새 상태 on_enter."""
+        logger.info("[State] %s → %s", self._current_state.name, new_state.name)
+        self._current_state.on_exit(self)
+        self._current_state = new_state
+        self._current_state.on_enter(self)
 
-    def resume(self) -> None:
-        """공정 재개. ESP32 → RUNNING 복귀."""
-        if not self._state.is_active:
-            return
-        mqtt_client.publish(TOPIC_CONTROL, "SORT_RESUME")
-        self._cb.on_process_resumed()
-        logger.info("[공정재개] pid=%s", self._state.process_id)
-
-    def stop(self, pid: int | None = None) -> None:
-        """공정 수동 중지. pid가 없으면 현재 진행 중인 공정을 중지."""
-        target_pid = pid or self._state.process_id
-        if target_pid is None:
-            return
-        try:
-            api_process_stop(int(target_pid))
-        except (RuntimeError, TimeoutError, OSError, ConnectionError) as e:
-            self._cb.on_error(f"공정 중지 실패: {e}")
-
-        mqtt_client.publish(TOPIC_CONTROL, "SORT_STOP")
-        self._state.reset()
-        self._cb.on_process_stopped(target_pid)
+    # ── 속성 ─────────────────────────────────────────────────
 
     @property
     def is_active(self) -> bool:
@@ -214,197 +190,95 @@ class ProcessController:
     def current_pid(self) -> int | None:
         return self._state.process_id
 
-    # ── MQTT 이벤트 핸들러 ────────────────────────────────────
+    @property
+    def classifier(self) -> ClassifierBase:
+        return self._classifier
+
+    @property
+    def order_items(self) -> list[dict]:
+        return self._state.order_items
+
+    # ── 공정 시작/중지 ────────────────────────────────────────
+
+    def start(self, process_data: dict) -> None:
+        """공정 시작."""
+        pid = int(process_data["process_id"])
+        try:
+            api_process_start(pid)
+        except (RuntimeError, TimeoutError, OSError, ConnectionError) as e:
+            self._cb.on_error(f"공정 시작 실패: {e}")
+            return
+
+        # IDLE → ACTIVE 전이
+        self._state.reset()
+        self._qr_gate.reset()
+        self._state.process_id = pid
+        self._state.process_data = process_data
+
+        order_id = process_data.get("order_id")
+        if order_id:
+            self._state.order_items = self._fetch_order_items(int(order_id))
+
+        self._transition_to(self._active_state)
+        mqtt_client.publish(TOPIC_CONTROL, "SORT_START")
+        self._cb.on_process_started(pid)
+        logger.info("[공정시작] pid=%s", pid)
+
+    def pause(self) -> None:
+        """공정 일시정지."""
+        if not self._state.is_active:
+            return
+        self._transition_to(self._paused_state)
+        mqtt_client.publish(TOPIC_CONTROL, "SORT_PAUSE")
+        self._cb.on_process_paused()
+
+    def resume(self) -> None:
+        """공정 재개."""
+        if not self._state.is_active:
+            return
+        self._transition_to(self._active_state)
+        mqtt_client.publish(TOPIC_CONTROL, "SORT_RESUME")
+        self._cb.on_process_resumed()
+
+    def stop(self, pid: int | None = None) -> None:
+        """공정 수동 중지 — CleanShutdown."""
+        target_pid = pid or self._state.process_id
+        if target_pid is None:
+            return
+        try:
+            api_process_stop(int(target_pid))
+        except (RuntimeError, TimeoutError, OSError, ConnectionError) as e:
+            self._cb.on_error(f"공정 중지 실패: {e}")
+
+        mqtt_client.publish(TOPIC_CONTROL, "SORT_STOP")
+        self._transition_to(self._idle_state)
+        self._cb.on_process_stopped(target_pid)
+
+    def shutdown(self) -> None:
+        """프로그램 종료 시 긴급 정리."""
+        if self._state.is_active:
+            try:
+                mqtt_client.publish(TOPIC_CONTROL, "SORT_STOP")
+            except Exception:
+                pass
+        self._state.reset()
+        self._qr_gate.reset()
+
+    # ── 이벤트 핸들러 → 현재 상태에 위임 ─────────────────────
 
     def handle_status(self, payload: str) -> None:
-        """device/status 수신 처리."""
-        state = FsmState.from_payload(payload)
-        if state is None:
-            return
-        self._cb.on_fsm_state_changed(state)
-
-        # PAUSED 상태에서는 Watchdog 비활성화
-        if state == FsmState.PAUSED:
-            return
-
-        # RUNNING 수신 → watchdog 타이머 리셋
-        if state == FsmState.RUNNING:
-            self._last_watchdog_ts = 0.0
-            return
-
-        # Watchdog: ESP32 IDLE인데 공정 진행 중이면 SORT_START 재전송 (쓰로틀링)
-        if state == FsmState.IDLE and self._state.is_active:
-            now = time.monotonic()
-            if now - self._last_watchdog_ts < self._WATCHDOG_INTERVAL_S:
-                return
-            self._last_watchdog_ts = now
-            logger.warning(
-                "[Watchdog] ESP32 IDLE but process %s active → re-send SORT_START",
-                self._state.process_id,
-            )
-            mqtt_client.publish(TOPIC_CONTROL, "SORT_START")
+        """device/status → 현재 상태에 위임."""
+        self._current_state.handle_status(self, payload)
 
     def handle_sensor(self, payload: str, processes: list[dict]) -> None:
-        """device/sensor 수신 처리."""
-        event = SensorEvent.from_payload(payload)
-        if event is None:
-            return
-
-        if event == SensorEvent.CAMERA_DETECT:
-            self._qr_gate_open = True
-            return
-        elif event == SensorEvent.PROXIMITY_ON:
-            self._cb.on_proximity(True)
-        elif event == SensorEvent.PROXIMITY_OFF:
-            self._cb.on_proximity(False)
-        elif event == SensorEvent.DETECTED:
-            self._handle_detected()
-        elif event == SensorEvent.SORTING_1L:
-            self._state.station_1l_active = True
-            # sort_queue 소비 (1L은 DETECTED 없이 SORTING_1L만 발행됨)
-            if self._state.sort_queue:
-                self._state.sort_queue.popleft()
-            self._cb.on_sorting_started("1L")
-        elif event == SensorEvent.SORTING_2L:
-            self._state.station_2l_active = True
-            self._cb.on_sorting_started("2L")
-        elif event == SensorEvent.SORTED_1L:
-            self._state.station_1l_active = False
-            self._cb.on_sorting_ended("1L")
-            # pending에서 첫 1L 항목 제거
-            for i, (code, d) in enumerate(self._state.pending_items):
-                if d == "1L":
-                    self._state.pending_items.pop(i)
-                    break
-            self._cb.on_pending_updated(list(self._state.pending_items))
-            self._handle_sort_result(event, processes)
-        elif event == SensorEvent.SORTED_2L:
-            self._state.station_2l_active = False
-            self._cb.on_sorting_ended("2L")
-            # pending에서 첫 2L 항목 제거
-            for i, (code, d) in enumerate(self._state.pending_items):
-                if d == "2L":
-                    self._state.pending_items.pop(i)
-                    break
-            self._cb.on_pending_updated(list(self._state.pending_items))
-            self._handle_sort_result(event, processes)
-        elif event == SensorEvent.SORTED_UNCLASSIFIED:
-            # pending에서 첫 항목 제거 (방향 무관)
-            if self._state.pending_items:
-                self._state.pending_items.pop(0)
-                self._cb.on_pending_updated(list(self._state.pending_items))
-            self._handle_sort_result(event, processes)
+        """device/sensor → 현재 상태에 위임."""
+        self._current_state.handle_sensor(self, payload, processes)
 
     def handle_qr(self, item_code: str | None) -> None:
-        """QR 인식 결과 → 즉시 SORT_DIR 발행 + 큐 기록 + 대기 목록 갱신.
-        게이트 없이 QR 인식 즉시 처리."""
+        """QR 인식 → 현재 상태에 위임."""
+        self._current_state.handle_qr(self, item_code)
 
-        if item_code is None or not item_code.strip():
-            self._state.sort_queue.append(SortDirection.WARN.value)
-            self._cb.on_qr_error("item_code 없음")
-            return
-
-        direction = self._resolve_direction(item_code)
-        self._state.sort_queue.append(direction.value)
-        # 대기 목록에 추가
-        self._state.pending_items.append((item_code, direction.value))
-        self._cb.on_pending_updated(list(self._state.pending_items))
-        # S1/S2 감지 전 예약: 즉시 ESP32에 방향 전송
-        mqtt_client.publish(TOPIC_CONTROL, f"SORT_DIR:{direction.value}")
-        logger.info("[QR] SORT_DIR:%s 즉시 전송", direction.value)
-        self._cb.on_qr_enqueued(item_code, direction.value, len(self._state.sort_queue))
-
-    # ── 내부 로직 ────────────────────────────────────────────
-
-    def _handle_detected(self) -> None:
-        """S1/S2 감지 → 큐 소비 + UI 업데이트. SORT_DIR은 handle_qr()에서 이미 전송됨."""
-        if self._state.sort_queue:
-            direction = self._state.sort_queue.popleft()
-            logger.info(
-                "[Queue] DETECTED (남은: %d)",
-                len(self._state.sort_queue),
-            )
-        else:
-            direction = SortDirection.WARN.value
-            logger.warning("[Queue] DETECTED but queue empty")
-
-        self._cb.on_detected(direction, len(self._state.sort_queue))
-
-    def _handle_sort_result(self, event: SensorEvent, processes: list[dict]) -> None:
-        """분류 확인 센서 이벤트 → DB 업데이트 + 자동 완료 확인."""
-        pid = self._state.process_id
-        if pid is None:
-            return
-
-        p = next((x for x in processes if x.get("process_id") == pid), None)
-        if p is None:
-            return
-
-        field_map = {
-            SensorEvent.SORTED_1L: "success_1l_qty",
-            SensorEvent.SORTED_2L: "success_2l_qty",
-            SensorEvent.SORTED_UNCLASSIFIED: "unclassified_qty",
-        }
-        field_name = field_map.get(event)
-        if field_name is None:
-            return
-
-        new_qty = (p.get(field_name) or 0) + 1
-        db_ok = True
-        try:
-            api_process_update(int(pid), **{field_name: new_qty})
-        except Exception as e:
-            logger.warning("[Controller] process_update error: %s", e)
-            db_ok = False
-        p[field_name] = new_qty
-
-        if event == SensorEvent.SORTED_UNCLASSIFIED:
-            self._cb.on_unclassified(new_qty, db_ok)
-        else:
-            kind = "1L" if event == SensorEvent.SORTED_1L else "2L"
-            self._cb.on_sort_result(kind, new_qty, db_ok)
-
-        self._check_completion(pid, p)
-
-    def _check_completion(self, pid: int, p: dict) -> None:
-        """분류 합계가 주문 수량에 도달하면 자동 공정 완료."""
-        sorted_total = (
-            (p.get("success_1l_qty") or 0)
-            + (p.get("success_2l_qty") or 0)
-            + (p.get("unclassified_qty") or 0)
-        )
-        order_total = p.get("order_total_qty") or 0
-        if order_total <= 0 or sorted_total < order_total:
-            return
-
-        logger.info("[공정완료] pid=%s sorted=%d/%d", pid, sorted_total, order_total)
-        try:
-            mqtt_client.publish(TOPIC_CONTROL, "SORT_STOP")
-            api_process_stop(int(pid))
-        except Exception as e:
-            logger.warning("[공정완료] stop error: %s", e)
-
-        self._state.reset()
-        self._cb.on_process_completed(pid, sorted_total, order_total)
-
-    def _resolve_direction(self, item_code: str) -> SortDirection:
-        """item_code + 주문 품목으로 분류 방향 결정."""
-        order_items = self._state.order_items
-        code_lower = item_code.strip().lower()
-
-        matched = any(
-            (it.get("item_code") or "").strip().lower() == code_lower
-            for it in order_items
-        )
-        if not matched:
-            return SortDirection.WARN
-
-        if code_lower.endswith("_1l"):
-            return SortDirection.LINE_1L
-        elif code_lower.endswith("_2l"):
-            return SortDirection.LINE_2L
-        else:
-            return SortDirection.WARN
+    # ── 유틸리티 ──────────────────────────────────────────────
 
     @staticmethod
     def _fetch_order_items(order_id: int) -> list[dict]:

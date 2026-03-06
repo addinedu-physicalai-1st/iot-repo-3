@@ -27,11 +27,6 @@ struct Command {
 
     /**
      * 수신 메시지 문자열을 파싱하여 Command 구조체를 생성한다.
-     *
-     * 지원 형식:
-     *   "SORT_START"  → SORT_START
-     *   "SORT_STOP"   → SORT_STOP
-     *   그 외          → UNKNOWN
      */
     static Command parse(const char* msg);
 };
