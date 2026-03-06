@@ -150,7 +150,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     dc_label.setStyleSheet("font-size: 12px; border: none;")
     dc_spin = QSpinBox()
     dc_spin.setRange(150, 255)
-    dc_spin.setValue(180)
+    dc_spin.setValue(165)
     dc_spin.setFixedWidth(60)
     dc_apply_btn = QPushButton("적용")
     dc_apply_btn.setFixedWidth(50)
@@ -169,7 +169,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     servo_a_label.setStyleSheet("font-size: 12px; border: none;")
     servo_a_spin = QSpinBox()
     servo_a_spin.setRange(0, 45)
-    servo_a_spin.setValue(40)
+    servo_a_spin.setValue(45)
     servo_a_spin.setFixedWidth(60)
     servo_a_spin.setSuffix("\u00b0")
     servo_a_spin.valueChanged.connect(
@@ -421,8 +421,8 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         _update_pending_list([])
         warning_label.setText("경고: (없음)")
         warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
-        dc_spin.setValue(180)
-        servo_a_spin.setValue(40)
+        dc_spin.setValue(165)
+        servo_a_spin.setValue(45)
         servo_b_spin.setValue(35)
 
     # ── 공정 목록 갱신 ───────────────────────────────────────────

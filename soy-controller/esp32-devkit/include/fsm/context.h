@@ -37,6 +37,9 @@ struct Context {
 
     std::queue<SortDir> dirQueue;
     int  dcSpeed    = config::dc::DEFAULT_SPEED;
+    /** 위치센서(S6) 감지 시 소프트 정지: 0=비활성, >0=시작 시 속도. onLoop에서 감속 후 brake() */
+    int  dcSoftStopStartSpeed = 0;
+    unsigned long dcSoftStopStartMs = 0;
     int  sortDegA   = config::servo::SORT_DEG_A;
     int  sortDegB   = config::servo::SORT_DEG_B;
     int  pending2L  = 0;

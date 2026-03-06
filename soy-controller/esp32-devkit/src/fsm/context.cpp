@@ -22,6 +22,7 @@ void Context::flushAll() {
     servoBSorting = false;
     pending2L = 0;
     cameraBlankUntil = 0;
+    dcSoftStopStartSpeed = 0;
 }
 
 void Context::syncAllSensors() {

@@ -15,17 +15,38 @@ extern ConveyingState conveyingState;
 extern PausedState    pausedState;
 
 void CameraHoldState::onEnter(Context& ctx) {
-    ctx.dcMotor.brake();
     _enterMs = millis();
+    if (config::dc::SOFT_STOP_DURATION_MS > 0) {
+        ctx.dcSoftStopStartSpeed = ctx.dcSpeed;
+        ctx.dcSoftStopStartMs = millis();
+        Serial.printf("[SENSOR] S6 → CAMERA_HOLD soft stop %lums\n", config::dc::SOFT_STOP_DURATION_MS);
+    } else {
+        ctx.dcMotor.brake();
+    }
     ctx.mqtt.publish(config::mqtt::TOPIC_SENSOR, "CAMERA_DETECT");
     Serial.println("[SENSOR] S6 → CAMERA_HOLD (waiting SORT_DIR)");
 }
 
 void CameraHoldState::onExit(Context& ctx) {
+    ctx.dcSoftStopStartSpeed = 0;
     ctx.led.stopBlink();
 }
 
 void CameraHoldState::onLoop(Context& ctx) {
+    // 위치센서 감지 시 DC 모터 소프트 정지: 감속 후 brake
+    if (ctx.dcSoftStopStartSpeed > 0) {
+        unsigned long duration = config::dc::SOFT_STOP_DURATION_MS;
+        unsigned long elapsed = millis() - ctx.dcSoftStopStartMs;
+        if (elapsed >= duration) {
+            ctx.dcMotor.brake();
+            ctx.dcSoftStopStartSpeed = 0;
+        } else {
+            int speed = (int)((unsigned long)ctx.dcSoftStopStartSpeed * (duration - elapsed) / duration);
+            if (speed < 0) speed = 0;
+            ctx.dcMotor.drive(speed);
+        }
+    }
+
     // LED 초록 점멸
     ctx.led.updateBlink(config::timing::LED_BLINK_MS, 0, 1, 0);
 
