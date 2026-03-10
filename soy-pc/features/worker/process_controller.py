@@ -75,6 +75,9 @@ class SensorEvent(str, Enum):
     SORTED_1L = "SORTED_1L"
     SORTED_2L = "SORTED_2L"
     SORTED_UNCLASSIFIED = "SORTED_UNCLASSIFIED"
+    CAMERA_TIMEOUT = "CAMERA_TIMEOUT"
+    SORT_TIMEOUT_1L = "SORT_TIMEOUT:1L"
+    SORT_TIMEOUT_2L = "SORT_TIMEOUT:2L"
 
     @classmethod
     def from_payload(cls, payload: str) -> "SensorEvent | None":

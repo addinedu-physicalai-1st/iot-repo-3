@@ -12,7 +12,6 @@ DB: MYSQL_* 또는 SOY_DATABASE_URL (soy-server와 동일).
 from __future__ import annotations
 
 import io
-import json
 import os
 import sys
 from pathlib import Path
@@ -100,15 +99,17 @@ def load_order_items(engine: Engine) -> list[tuple[int, int, str, str]]:
 
 
 def qr_payload(order_item_id: int, item_code: str) -> str:
-    """QR에 넣을 문자열 (스캔 시 식별용)."""
-    return json.dumps(
-        {"order_item_id": order_item_id, "item_code": item_code},
-        ensure_ascii=False,
-    )
+    """QR에 넣을 문자열 (스캔 시 식별용). plain text item_code만 반환."""
+    return item_code
 
 
 def make_qr_image(payload: str, size_mm: float = QR_SIZE_MM) -> io.BytesIO:
-    qr = qrcode.QRCode(version=1, box_size=4, border=2)
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=8,
+        border=4,
+    )
     qr.add_data(payload)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")

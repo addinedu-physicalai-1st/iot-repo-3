@@ -12,34 +12,15 @@ from features.worker.process_controller import TOPIC_SENSOR, TOPIC_STATUS
 logger = logging.getLogger(__name__)
 
 
-def _try_decode_qr(pyzbar_mod, cv2, frame):
-    """다중 각도 + 전처리로 QR 인식 시도."""
-    # 1차: 원본
-    results = pyzbar_mod.decode(frame)
-    if results:
-        return results
+def _try_decode_qr_wechat(wechat_detector, frame):
+    """WeChatQRCode로 QR 디코딩. 검출+디코딩을 한 번에 처리 (~5-15ms).
 
-    # 2차: 90°, 180°, 270° 회전
-    for rot in [
-        cv2.ROTATE_90_CLOCKWISE,
-        cv2.ROTATE_180,
-        cv2.ROTATE_90_COUNTERCLOCKWISE,
-    ]:
-        rotated = cv2.rotate(frame, rot)
-        results = pyzbar_mod.decode(rotated)
-        if results:
-            return results
-
-    # 3차: 그레이스케일 + 적응적 이진화
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    binary = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-    )
-    results = pyzbar_mod.decode(binary)
-    if results:
-        return results
-
-    return []
+    Returns (texts, points):
+        texts  — 디코딩된 QR 문자열 리스트
+        points — 각 QR 꼭짓점 좌표 (Mat 리스트, 없으면 빈 튜플)
+    """
+    texts, points = wechat_detector.detectAndDecode(frame)
+    return [t for t in texts if t], points
 
 
 # ── QR 블로킹 없는 독립 디코딩 워커 ──────────────────────────────
@@ -48,10 +29,9 @@ class QRDecodeWorker(QThread):
 
     qr_decoded = pyqtSignal(str)
 
-    def __init__(self, pyzbar_mod, cv2_mod, parent=None):
+    def __init__(self, wechat_detector, parent=None):
         super().__init__(parent)
-        self.pyzbar_mod = pyzbar_mod
-        self.cv2 = cv2_mod
+        self._wechat_detector = wechat_detector
         self._running = False
         import queue
 
@@ -89,18 +69,12 @@ class QRDecodeWorker(QThread):
             if now < self._cooldown_until:
                 continue
 
-            if self.pyzbar_mod is None:
-                continue
+            decoded_list, points = _try_decode_qr_wechat(
+                self._wechat_detector, frame
+            )
 
-            decoded_list = _try_decode_qr(self.pyzbar_mod, self.cv2, frame)
-
-            for obj in decoded_list:
-                if obj.type != "QRCODE":
-                    continue
-                try:
-                    qr_data = obj.data.decode("utf-8", errors="strict").strip()
-                except Exception:
-                    continue
+            for qr_data in decoded_list:
+                qr_data = qr_data.strip()
                 if qr_data and qr_data != self._last_decoded:
                     self._last_decoded = qr_data
                     self._cooldown_until = now + 1.0
@@ -138,15 +112,29 @@ class UdpCameraThread(QThread):
         import cv2
         import numpy as np
 
-        # pyzbar는 libzbar0 시스템 패키지 필요 — 없으면 QR 디코딩만 비활성화
-        pyzbar_mod = None
+        # WeChat QR 디코더 초기화
+        wechat_detector = None
         try:
-            from pyzbar import pyzbar as _pyzbar
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
+            models_dir = os.path.join(project_root, "models")
 
-            pyzbar_mod = _pyzbar
-            logger.info("[UdpCam] pyzbar 로드 OK")
-        except ImportError:
-            logger.warning("pyzbar 로드 실패 (libzbar0 미설치?). QR 디코딩 비활성화.")
+            detect_prototxt = os.path.join(models_dir, "detect.prototxt")
+            detect_caffemodel = os.path.join(models_dir, "detect.caffemodel")
+            sr_prototxt = os.path.join(models_dir, "sr.prototxt")
+            sr_caffemodel = os.path.join(models_dir, "sr.caffemodel")
+
+            if all(os.path.exists(p) for p in [detect_prototxt, detect_caffemodel, sr_prototxt, sr_caffemodel]):
+                wechat_detector = cv2.wechat_qrcode.WeChatQRCode(
+                    detect_prototxt, detect_caffemodel, sr_prototxt, sr_caffemodel
+                )
+                logger.info("[UdpCam] WeChat QR 디코더(CNN Models) 초기화 OK")
+            else:
+                wechat_detector = cv2.wechat_qrcode.WeChatQRCode()
+                logger.info("[UdpCam] WeChat QR 디코더(내장 모델) 초기화 OK")
+        except Exception as e:
+            logger.warning("WeChat QR 초기화 실패: %s. QR 디코딩 비활성화.", e)
 
         self._running = True
         sock = None
@@ -161,8 +149,8 @@ class UdpCameraThread(QThread):
             buffers: dict[int, dict] = {}
             frame_count = 0
 
-            if pyzbar_mod is not None:
-                self._decoder = QRDecodeWorker(pyzbar_mod, cv2)
+            if wechat_detector is not None:
+                self._decoder = QRDecodeWorker(wechat_detector)
                 self._decoder.qr_decoded.connect(self.qr_decoded)
                 self._decoder.start()
 
@@ -213,13 +201,14 @@ class UdpCameraThread(QThread):
                 if frame is None:
                     continue
 
+                # 디코더에 원본 프레임 전달 (오버레이 전)
+                if self._decoder is not None:
+                    self._decoder.put_frame(frame)
+
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w, ch = frame_rgb.shape
                 qimg = QImage(frame_rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
                 self.frame_ready.emit(qimg.copy())
-
-                if self._decoder is not None:
-                    self._decoder.put_frame(frame)
 
         except Exception as e:
             logger.exception("UdpCameraThread: %s", e)
@@ -275,13 +264,29 @@ class CameraQRThread(QThread):
         import time
         import cv2
 
-        pyzbar_mod = None
+        # WeChat QR 디코더 초기화
+        wechat_detector = None
         try:
-            from pyzbar import pyzbar as _pyzbar
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
+            models_dir = os.path.join(project_root, "models")
 
-            pyzbar_mod = _pyzbar
-        except ImportError:
-            logger.warning("pyzbar 로드 실패 (libzbar0 미설치?). QR 디코딩 비활성화.")
+            detect_prototxt = os.path.join(models_dir, "detect.prototxt")
+            detect_caffemodel = os.path.join(models_dir, "detect.caffemodel")
+            sr_prototxt = os.path.join(models_dir, "sr.prototxt")
+            sr_caffemodel = os.path.join(models_dir, "sr.caffemodel")
+
+            if all(os.path.exists(p) for p in [detect_prototxt, detect_caffemodel, sr_prototxt, sr_caffemodel]):
+                wechat_detector = cv2.wechat_qrcode.WeChatQRCode(
+                    detect_prototxt, detect_caffemodel, sr_prototxt, sr_caffemodel
+                )
+                logger.info("[CameraQR] WeChat QR 디코더(CNN Models) 초기화 OK")
+            else:
+                wechat_detector = cv2.wechat_qrcode.WeChatQRCode()
+                logger.info("[CameraQR] WeChat QR 디코더(내장 모델) 초기화 OK")
+        except Exception as e:
+            logger.warning("WeChat QR 초기화 실패: %s. QR 디코딩 비활성화.", e)
 
         self._running = True
         cap = None
@@ -305,23 +310,20 @@ class CameraQRThread(QThread):
                 self.frame_ready.emit(qimg.copy())
 
                 # QR 디코딩 (동일 QR 연속 인식 방지용 쿨다운)
-                if pyzbar_mod is None:
+                if wechat_detector is None:
                     continue
                 now = time.monotonic()
                 if now < self._cooldown_until:
                     continue
-                decoded_list = pyzbar_mod.decode(frame)
-                for obj in decoded_list:
-                    if obj.type != "QRCODE":
-                        continue
-                    try:
-                        data = obj.data.decode("utf-8", errors="strict").strip()
-                    except Exception:
-                        continue
-                    if data and data != self._last_decoded:
-                        self._last_decoded = data
+                decoded_list, _pts = _try_decode_qr_wechat(
+                    wechat_detector, frame
+                )
+                for qr_data in decoded_list:
+                    qr_data = qr_data.strip()
+                    if qr_data and qr_data != self._last_decoded:
+                        self._last_decoded = qr_data
                         self._cooldown_until = now + 2.0  # 2초 쿨다운
-                        self.qr_decoded.emit(data)
+                        self.qr_decoded.emit(qr_data)
                         break
         except Exception as e:
             logger.exception("CameraQRThread: %s", e)

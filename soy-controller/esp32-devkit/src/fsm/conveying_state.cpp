@@ -89,6 +89,11 @@ void ConveyingState::onCommand(Context& ctx, const Command& cmd) {
             Serial.printf("[CMD] queued 2L (q=%d)\n", (int)ctx.dirQueue.size());
             break;
 
+        case CommandType::SORT_DIR_WARN:
+            // 미분류 상품: 큐에 넣지 않음 (서보 동작 없이 통과)
+            Serial.println("[CMD] SORT_DIR:WARN (no queue)");
+            break;
+
         case CommandType::DC_SPEED:
             ctx.dcSpeed = constrain(cmd.value, 150, 255);
             ctx.dcMotor.drive(ctx.dcSpeed);

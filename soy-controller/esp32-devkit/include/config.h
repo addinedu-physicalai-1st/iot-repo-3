@@ -31,7 +31,7 @@ namespace dc {
     constexpr int LEDC_CHANNEL    = 0;
     constexpr int FREQ_HZ         = 5000;
     constexpr int RESOLUTION_BITS = 8;
-    constexpr int DEFAULT_SPEED   = 165;
+    constexpr int DEFAULT_SPEED   = 175;
     /** 위치센서(S6) 감지 시 DC 모터 소프트 정지 시간(ms). 클수록 천천히 정지. 0이면 즉시 정지. */
     constexpr unsigned long SOFT_STOP_DURATION_MS = 450;
 }
@@ -53,10 +53,11 @@ namespace sensor {
 }
 
 namespace timing {
-    constexpr unsigned long SORT_SAFETY_TIMEOUT_MS = 2000;
+    constexpr unsigned long SORT_SAFETY_TIMEOUT_MS = 3000;
     constexpr unsigned long CAMERA_WAIT_MAX_MS     = 5000;
-    constexpr unsigned long CAMERA_BLANK_MS        = 2000;
+    constexpr unsigned long CAMERA_BLANK_MS        = 3000;
     constexpr unsigned long LED_BLINK_MS           = 500;
+    constexpr unsigned long SOFT_STOP_DURATION_MS  = 250;  // S6 감지 시 감속 정지 시간
 }
 
 namespace queue {

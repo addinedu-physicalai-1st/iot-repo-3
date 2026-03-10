@@ -15,6 +15,7 @@ enum class CommandType : uint8_t {
     SORT_RESUME,   // 재개 — DC 모터 재구동
     SORT_DIR_1L,   // QR 인식 결과: 1L 방향 예약
     SORT_DIR_2L,   // QR 인식 결과: 2L 방향 예약
+    SORT_DIR_WARN, // QR 인식 결과: 미분류 (큐 없이 즉시 통과)
     DC_SPEED,      // DC 모터 속도 변경 — "DC_SPEED:180"
     SERVO_DEG_A,   // 서보A 분류 각도 변경 — "SERVO_A:35"
     SERVO_DEG_B,   // 서보B 분류 각도 변경 — "SERVO_B:35"

@@ -3,6 +3,12 @@ states/active.py — ACTIVE 상태 (CONVEYING/CAMERA_HOLD/SORTING 포함).
 
 공정 진행 중. QR 3단 필터 + 독립 분류기 + 센서 이벤트 전 처리.
 
+미분류 카운팅 정책:
+  - 모든 항목(1L/2L/WARN/미인식)은 큐와 pending에 등록하여 추적
+  - 미분류 카운팅은 S5(미분류대 감지센서) 감지 시에만 수행
+  - CAMERA_TIMEOUT(QR 미인식)도 pending에 등록하여 작업자가 추적 가능
+  - S5 미감지 시 → pending에 잔류 → 작업자가 센서 이상 등 확인
+
 분류 대기 정리 규칙:
   - SORTED_UNCLASSIFIED 시: 해당 pending 제거 → station 플래그 정리
   - 모든 SORTED_* 후: pending/queue 모두 비어있으면 station 전부 초기화
@@ -43,6 +49,7 @@ class ActiveState(ProcessStateBase):
 
         if item_code is None or not item_code.strip():
             controller._state.sort_queue.append(SortDirection.WARN.value)
+            mqtt_client.publish(TOPIC_CONTROL, "SORT_DIR:WARN")
             controller._cb.on_qr_error("item_code 없음")
             return
 
@@ -64,7 +71,7 @@ class ActiveState(ProcessStateBase):
         # QR 게이트 통과 확정
         controller._qr_gate.accept(item_code)
 
-        # 큐 + 대기 목록 등록
+        # 큐 + 대기 목록 등록 (WARN 포함 — 모든 항목 추적)
         controller._state.sort_queue.append(direction.value)
         controller._state.pending_items.append((item_code, direction.value))
         controller._cb.on_pending_updated(list(controller._state.pending_items))
@@ -88,6 +95,14 @@ class ActiveState(ProcessStateBase):
 
         if event == SensorEvent.CAMERA_DETECT:
             controller._qr_gate.open_camera_gate()
+            return
+        elif event == SensorEvent.CAMERA_TIMEOUT:
+            # ★ QR 미인식 → pending에 등록하여 추적 (S5 감지 시 카운팅)
+            controller._state.sort_queue.append(SortDirection.WARN.value)
+            controller._state.pending_items.append(("(미인식)", SortDirection.WARN.value))
+            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            controller._cb.on_qr_error("카메라 타임아웃 — QR 미인식")
+            logger.info("[CAMERA_TIMEOUT] QR 미인식 → pending 등록 (S5 대기)")
             return
         elif event == SensorEvent.PROXIMITY_ON:
             controller._cb.on_proximity(True)
@@ -113,7 +128,7 @@ class ActiveState(ProcessStateBase):
                     break
             controller._cb.on_pending_updated(list(controller._state.pending_items))
             self._handle_sort_result(controller, event, processes)
-            self._cleanup_if_empty(controller)  # ★ 컨베이어 비었으면 전체 정리
+            self._cleanup_if_empty(controller)
         elif event == SensorEvent.SORTED_2L:
             controller._state.station_2l_active = False
             controller._cb.on_sorting_ended("2L")
@@ -124,18 +139,16 @@ class ActiveState(ProcessStateBase):
                     break
             controller._cb.on_pending_updated(list(controller._state.pending_items))
             self._handle_sort_result(controller, event, processes)
-            self._cleanup_if_empty(controller)  # ★ 컨베이어 비었으면 전체 정리
+            self._cleanup_if_empty(controller)
         elif event == SensorEvent.SORTED_UNCLASSIFIED:
-            # ★ 미분류: pending 첫 항목 제거 (방향 무관)
+            # ★ S5 감지 시에만 미분류 카운팅
             removed_dir = None
             if controller._state.pending_items:
                 _, removed_dir = controller._state.pending_items.pop(0)
             controller._cb.on_pending_updated(list(controller._state.pending_items))
 
-            # ★ 해당 방향의 station 플래그도 정리 (서보 타임아웃으로 soy-pc에 정리 알림 없이
-            #   물품이 미분류로 빠진 경우, station_active가 True로 잔류하는 버그 방지)
+            # 해당 방향의 station 플래그 정리
             if removed_dir == "1L" and controller._state.station_1l_active:
-                # pending에 다른 1L이 없으면 station 비활성화
                 has_more_1l = any(d == "1L" for _, d in controller._state.pending_items)
                 if not has_more_1l:
                     controller._state.station_1l_active = False
@@ -149,7 +162,9 @@ class ActiveState(ProcessStateBase):
                     logger.info("[Cleanup] station_2l_active → False (미분류 통과)")
 
             self._handle_sort_result(controller, event, processes)
-            self._cleanup_if_empty(controller)  # ★ 컨베이어 비었으면 전체 정리
+            self._cleanup_if_empty(controller)
+        elif event in (SensorEvent.SORT_TIMEOUT_1L, SensorEvent.SORT_TIMEOUT_2L):
+            self._handle_sort_timeout(controller, event, processes)
 
     def handle_status(self, controller: ProcessController, payload: str) -> None:
         from features.worker.process_controller import FsmState, TOPIC_CONTROL
@@ -177,6 +192,45 @@ class ActiveState(ProcessStateBase):
             mqtt_client.publish(TOPIC_CONTROL, "SORT_START")
 
     # ── 내부 헬퍼 ────────────────────────────────────────────
+
+    @staticmethod
+    def _handle_sort_timeout(
+        controller: ProcessController, event, processes: list[dict]
+    ) -> None:
+        """서보 타임아웃 → 미분류 처리 + 자동 일시정지."""
+        from features.worker.process_controller import SensorEvent
+
+        station = "1L" if event == SensorEvent.SORT_TIMEOUT_1L else "2L"
+        direction = station
+
+        # station 비활성화
+        if station == "1L":
+            controller._state.station_1l_active = False
+        else:
+            controller._state.station_2l_active = False
+        controller._cb.on_sorting_ended(station)
+
+        # pending에서 해당 방향 첫 항목 제거
+        for i, (code, d) in enumerate(controller._state.pending_items):
+            if d == direction:
+                controller._state.pending_items.pop(i)
+                break
+        controller._cb.on_pending_updated(list(controller._state.pending_items))
+
+        # 미분류 수량 증가 (DB)
+        ActiveState._handle_sort_result(
+            controller, SensorEvent.SORTED_UNCLASSIFIED, processes
+        )
+        ActiveState._cleanup_if_empty(controller)
+
+        # UI 경고 표시
+        controller._cb.on_qr_error(
+            f"서보 타임아웃 ({station}) — 물리적 이상 감지. 자동 일시정지합니다."
+        )
+        logger.warning("[SORT_TIMEOUT] %s — 자동 pause", station)
+
+        # 자동 일시정지
+        controller.pause()
 
     @staticmethod
     def _handle_detected(controller: ProcessController) -> None:

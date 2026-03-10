@@ -36,15 +36,72 @@ class PausedState(ProcessStateBase):
         self, controller: ProcessController, payload: str, processes: list[dict]
     ) -> None:
         from features.worker.process_controller import SensorEvent
+        from features.worker.states.active import ActiveState
 
         event = SensorEvent.from_payload(payload)
         if event is None:
             return
-        # PAUSED에서는 근접 센서만 추적
+        # PAUSED에서는 근접 센서 + 분류 완료 이벤트 처리
         if event == SensorEvent.PROXIMITY_ON:
             controller._cb.on_proximity(True)
         elif event == SensorEvent.PROXIMITY_OFF:
             controller._cb.on_proximity(False)
+        elif event == SensorEvent.SORTED_1L:
+            controller._state.station_1l_active = False
+            controller._cb.on_sorting_ended("1L")
+            for i, (code, d) in enumerate(controller._state.pending_items):
+                if d == "1L":
+                    controller._state.pending_items.pop(i)
+                    break
+            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            ActiveState._handle_sort_result(controller, event, processes)
+            ActiveState._cleanup_if_empty(controller)
+        elif event == SensorEvent.SORTED_2L:
+            controller._state.station_2l_active = False
+            controller._cb.on_sorting_ended("2L")
+            for i, (code, d) in enumerate(controller._state.pending_items):
+                if d == "2L":
+                    controller._state.pending_items.pop(i)
+                    break
+            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            ActiveState._handle_sort_result(controller, event, processes)
+            ActiveState._cleanup_if_empty(controller)
+        elif event == SensorEvent.SORTED_UNCLASSIFIED:
+            removed_dir = None
+            if controller._state.pending_items:
+                _, removed_dir = controller._state.pending_items.pop(0)
+            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            if removed_dir == "1L" and controller._state.station_1l_active:
+                has_more_1l = any(d == "1L" for _, d in controller._state.pending_items)
+                if not has_more_1l:
+                    controller._state.station_1l_active = False
+                    controller._cb.on_sorting_ended("1L")
+            elif removed_dir == "2L" and controller._state.station_2l_active:
+                has_more_2l = any(d == "2L" for _, d in controller._state.pending_items)
+                if not has_more_2l:
+                    controller._state.station_2l_active = False
+                    controller._cb.on_sorting_ended("2L")
+            ActiveState._handle_sort_result(controller, event, processes)
+            ActiveState._cleanup_if_empty(controller)
+        elif event in (SensorEvent.SORT_TIMEOUT_1L, SensorEvent.SORT_TIMEOUT_2L):
+            station = "1L" if event == SensorEvent.SORT_TIMEOUT_1L else "2L"
+            if station == "1L":
+                controller._state.station_1l_active = False
+            else:
+                controller._state.station_2l_active = False
+            controller._cb.on_sorting_ended(station)
+            for i, (code, d) in enumerate(controller._state.pending_items):
+                if d == station:
+                    controller._state.pending_items.pop(i)
+                    break
+            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            ActiveState._handle_sort_result(
+                controller, SensorEvent.SORTED_UNCLASSIFIED, processes
+            )
+            ActiveState._cleanup_if_empty(controller)
+            controller._cb.on_qr_error(
+                f"서보 타임아웃 ({station}) — 물리적 이상 감지."
+            )
 
     def handle_status(self, controller: ProcessController, payload: str) -> None:
         from features.worker.process_controller import FsmState

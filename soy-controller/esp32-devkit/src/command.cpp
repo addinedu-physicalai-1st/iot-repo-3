@@ -16,6 +16,8 @@ Command Command::parse(const char* msg) {
         cmd.type = CommandType::SORT_DIR_1L;
     } else if (strcmp(msg, "SORT_DIR:2L") == 0) {
         cmd.type = CommandType::SORT_DIR_2L;
+    } else if (strcmp(msg, "SORT_DIR:WARN") == 0) {
+        cmd.type = CommandType::SORT_DIR_WARN;
     } else if (strncmp(msg, "DC_SPEED:", 9) == 0) {
         cmd.type = CommandType::DC_SPEED;
         cmd.value = atoi(msg + 9);

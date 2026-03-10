@@ -101,16 +101,18 @@ void Context::processSorters(unsigned long now) {
     }
     s5Prev = det5;
 
-    // Safety timeout: 서보A (2s 초과 시 원위치)
+    // Safety timeout: 서보A (3s 초과 시 원위치 + PC에 알림)
     if (servoASorting && (now - servoAStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
         servoA.center();
         servoASorting = false;
-        Serial.println("[TIMEOUT] servoA safety return");
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORT_TIMEOUT:1L");
+        Serial.println("[TIMEOUT] servoA safety return → SORT_TIMEOUT:1L");
     }
-    // Safety timeout: 서보B (2s 초과 시 원위치)
+    // Safety timeout: 서보B (3s 초과 시 원위치 + PC에 알림)
     if (servoBSorting && (now - servoBStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
         servoB.center();
         servoBSorting = false;
-        Serial.println("[TIMEOUT] servoB safety return");
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORT_TIMEOUT:2L");
+        Serial.println("[TIMEOUT] servoB safety return → SORT_TIMEOUT:2L");
     }
 }

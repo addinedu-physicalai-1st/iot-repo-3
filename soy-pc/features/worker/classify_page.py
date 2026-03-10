@@ -6,11 +6,17 @@ from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QFrame,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QPushButton,
+    QScrollArea,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QTableWidgetItem,
@@ -18,7 +24,6 @@ from PyQt6.QtWidgets import (
 
 from api import list_processes, process_update, list_inventory
 from features.worker.threads import UdpCameraThread, MqttSignalBridge
-from features.worker.inbound_dialog import parse_qr_payload
 from mqtt_client import mqtt_client
 from features.worker.process_controller import (
     FsmState,
@@ -76,14 +81,90 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     monitor_layout.setContentsMargins(12, 12, 12, 12)
     monitor_layout.setSpacing(16)
 
-    # 좌측: 카메라 프리뷰
+    # 좌측: 카메라 프리뷰 + 설정
+    cam_col = QVBoxLayout()
+    cam_col.setSpacing(6)
+
     cam_preview = QLabel("카메라 대기")
     cam_preview.setFixedSize(320, 240)
     cam_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
     cam_preview.setStyleSheet(
         "background: #222; color: #888; border: 1px solid #555; font-size: 13px;"
     )
-    monitor_layout.addWidget(cam_preview)
+    cam_col.addWidget(cam_preview)
+
+    # ── 카메라 설정 토글 ──────────────────────────────────────
+    cam_settings_toggle = QPushButton("카메라 설정 ▼")
+    cam_settings_toggle.setFixedHeight(24)
+    cam_settings_toggle.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+    cam_col.addWidget(cam_settings_toggle)
+
+    cam_settings_group = QGroupBox()
+    cam_settings_group.setStyleSheet(
+        "QGroupBox { border: 1px solid #ccc; border-radius: 4px; padding: 4px; }"
+    )
+    cam_settings_group.setVisible(False)
+
+    cam_grid = QGridLayout(cam_settings_group)
+    cam_grid.setContentsMargins(4, 4, 4, 4)
+    cam_grid.setSpacing(4)
+
+    def _cam_cmd(key: str, val: int):
+        mqtt_client.publish(TOPIC_CONTROL, f"CAM:{key}:{val}")
+
+    def _add_cam_slider(grid, row, label, key, min_v, max_v, default):
+        lbl = QLabel(label)
+        lbl.setStyleSheet("font-size: 11px; border: none;")
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(min_v, max_v)
+        slider.setValue(default)
+        slider.setFixedWidth(120)
+        val_lbl = QLabel(str(default))
+        val_lbl.setFixedWidth(28)
+        val_lbl.setStyleSheet("font-size: 11px; border: none;")
+        slider.valueChanged.connect(
+            lambda v: (val_lbl.setText(str(v)), _cam_cmd(key, v))
+        )
+        grid.addWidget(lbl, row, 0)
+        grid.addWidget(slider, row, 1)
+        grid.addWidget(val_lbl, row, 2)
+        return slider
+
+    def _add_cam_check(grid, row, label, key, default):
+        cb = QCheckBox(label)
+        cb.setStyleSheet("font-size: 11px; border: none;")
+        cb.setChecked(default)
+        cb.toggled.connect(lambda v: _cam_cmd(key, 1 if v else 0))
+        grid.addWidget(cb, row, 0, 1, 3)
+        return cb
+
+    _add_cam_slider(cam_grid, 0, "JPEG 품질", "quality", 4, 63, 12)
+    _add_cam_slider(cam_grid, 1, "밝기", "brightness", -2, 2, 0)
+    _add_cam_slider(cam_grid, 2, "대비", "contrast", -2, 2, 0)
+    _add_cam_slider(cam_grid, 3, "채도", "saturation", -2, 2, 0)
+    _add_cam_slider(cam_grid, 4, "선명도", "sharpness", -2, 2, 0)
+    _add_cam_slider(cam_grid, 5, "노출 보정", "ae_level", -2, 2, 0)
+    _add_cam_slider(cam_grid, 6, "수동 노출", "aec_value", 0, 1200, 300)
+    _add_cam_slider(cam_grid, 7, "수동 게인", "agc_gain", 0, 30, 0)
+
+    _add_cam_check(cam_grid, 8, "자동 노출", "exposure_ctrl", True)
+    _add_cam_check(cam_grid, 9, "자동 게인", "gain_ctrl", True)
+    _add_cam_check(cam_grid, 10, "화이트밸런스", "whitebal", True)
+    _add_cam_check(cam_grid, 11, "좌우반전", "hmirror", False)
+    _add_cam_check(cam_grid, 12, "상하반전", "vflip", True)
+    _add_cam_check(cam_grid, 13, "렌즈 보정", "lenc", True)
+
+    cam_col.addWidget(cam_settings_group)
+    cam_col.addStretch()
+
+    def _toggle_cam_settings():
+        vis = not cam_settings_group.isVisible()
+        cam_settings_group.setVisible(vis)
+        cam_settings_toggle.setText("카메라 설정 ▲" if vis else "카메라 설정 ▼")
+
+    cam_settings_toggle.clicked.connect(_toggle_cam_settings)
+
+    monitor_layout.addLayout(cam_col)
 
     # 우측: HMI 스타일 공정 상태
     info_layout = QVBoxLayout()
@@ -141,6 +222,37 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     stations_row.addStretch()
     info_layout.addLayout(stations_row)
 
+    # ── 하드웨어 설정 동적 로드 ──────────────────────────────────
+    def _load_hardware_configs():
+        import os
+        import re
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+        config_path = os.path.join(
+            project_root, "soy-controller", "esp32-devkit", "include", "config.h"
+        )
+        dc_val, sa_val, sb_val = 180, 45, 35
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                m_dc = re.search(
+                    r"constexpr\s+int\s+DEFAULT_SPEED\s*=\s*(\d+);", content
+                )
+                m_sa = re.search(r"constexpr\s+int\s+SORT_DEG_A\s*=\s*(\d+);", content)
+                m_sb = re.search(r"constexpr\s+int\s+SORT_DEG_B\s*=\s*(\d+);", content)
+                if m_dc:
+                    dc_val = int(m_dc.group(1))
+                if m_sa:
+                    sa_val = int(m_sa.group(1))
+                if m_sb:
+                    sb_val = int(m_sb.group(1))
+        except Exception as e:
+            logger.warning("config.h 읽기 실패, 기본값 사용: %s", e)
+        return dc_val, sa_val, sb_val
+
+    _hw_dc_speed, _hw_servo_a, _hw_servo_b = _load_hardware_configs()
+
     # ── DC 속도 / 서보 각도 컨트롤 ──────────────────────────────
     ctrl_row = QHBoxLayout()
     ctrl_row.setSpacing(12)
@@ -150,7 +262,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     dc_label.setStyleSheet("font-size: 12px; border: none;")
     dc_spin = QSpinBox()
     dc_spin.setRange(150, 255)
-    dc_spin.setValue(165)
+    dc_spin.setValue(_hw_dc_speed)
     dc_spin.setFixedWidth(60)
     dc_apply_btn = QPushButton("적용")
     dc_apply_btn.setFixedWidth(50)
@@ -169,7 +281,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     servo_a_label.setStyleSheet("font-size: 12px; border: none;")
     servo_a_spin = QSpinBox()
     servo_a_spin.setRange(0, 45)
-    servo_a_spin.setValue(45)
+    servo_a_spin.setValue(_hw_servo_a)
     servo_a_spin.setFixedWidth(60)
     servo_a_spin.setSuffix("\u00b0")
     servo_a_spin.valueChanged.connect(
@@ -184,7 +296,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     servo_b_label.setStyleSheet("font-size: 12px; border: none;")
     servo_b_spin = QSpinBox()
     servo_b_spin.setRange(0, 45)
-    servo_b_spin.setValue(35)
+    servo_b_spin.setValue(_hw_servo_b)
     servo_b_spin.setFixedWidth(60)
     servo_b_spin.setSuffix("\u00b0")
     servo_b_spin.valueChanged.connect(
@@ -401,17 +513,38 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         )
 
     # ── QR → 컨트롤러 ───────────────────────────────────────────
+    def _extract_item_code(data: str) -> str | None:
+        """QR 데이터에서 item_code 추출. plain text 및 구 JSON 형식 모두 지원."""
+        data = (data or "").strip()
+        if not data:
+            return None
+        # 구 QR 코드 호환: JSON 형식 → item_code 추출
+        if data.startswith("{"):
+            import json
+
+            try:
+                payload = json.loads(data)
+                return payload.get("item_code", "").strip() or None
+            except (json.JSONDecodeError, AttributeError):
+                return None
+        # 신 QR 코드: plain text = item_code 그대로
+        return data
+
     def _on_classify_qr_decoded(data: str):
-        payload = parse_qr_payload(data)
-        if not payload:
-            warning_label.setText("경고: QR 인식 형식 오류")
-            warning_label.setStyleSheet(
-                "font-size: 12px; color: #f39c12; border: none;"
-            )
-            logger.warning("[QR] 파싱 실패: %s", data)
-            return
-        item_code = payload.get("item_code", "")
-        _controller.handle_qr(item_code if item_code else None)
+        item_code = _extract_item_code(data)
+        # 카메라 프리뷰 테두리 깜빡임 (QR 감지 피드백)
+        cam_preview.setStyleSheet(
+            "background: #222; color: #888; border: 2px solid #27ae60; font-size: 13px;"
+        )
+        from PyQt6.QtCore import QTimer
+
+        QTimer.singleShot(
+            500,
+            lambda: cam_preview.setStyleSheet(
+                "background: #222; color: #888; border: 1px solid #555; font-size: 13px;"
+            ),
+        )
+        _controller.handle_qr(item_code)
 
     # ── 모니터 초기화 ────────────────────────────────────────────
     def _reset_monitor():
@@ -421,9 +554,9 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         _update_pending_list([])
         warning_label.setText("경고: (없음)")
         warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
-        dc_spin.setValue(165)
-        servo_a_spin.setValue(45)
-        servo_b_spin.setValue(35)
+        dc_spin.setValue(_hw_dc_speed)
+        servo_a_spin.setValue(_hw_servo_a)
+        servo_b_spin.setValue(_hw_servo_b)
 
     # ── 공정 목록 갱신 ───────────────────────────────────────────
     def _refresh_classify_list():

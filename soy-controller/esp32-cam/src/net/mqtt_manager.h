@@ -7,6 +7,7 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 
+#include "esp_camera.h"
 #include "stream_state.h"
 
 class MqttManager {
@@ -25,6 +26,7 @@ public:
 private:
     void reconnect();
     static void _rawCallback(char* topic, byte* payload, unsigned int length);
+    static void _handleCameraCommand(const char* cmd);
 
     WiFiClient    _wifiClient;
     PubSubClient  _mqtt;

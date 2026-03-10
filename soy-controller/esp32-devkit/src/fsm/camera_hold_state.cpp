@@ -15,6 +15,7 @@ extern ConveyingState conveyingState;
 extern PausedState    pausedState;
 
 void CameraHoldState::onEnter(Context& ctx) {
+    ctx.dcMotor.startSoftStop(ctx.dcSpeed, config::timing::SOFT_STOP_DURATION_MS);
     _enterMs = millis();
     if (config::dc::SOFT_STOP_DURATION_MS > 0) {
         ctx.dcSoftStopStartSpeed = ctx.dcSpeed;
@@ -24,7 +25,7 @@ void CameraHoldState::onEnter(Context& ctx) {
         ctx.dcMotor.brake();
     }
     ctx.mqtt.publish(config::mqtt::TOPIC_SENSOR, "CAMERA_DETECT");
-    Serial.println("[SENSOR] S6 → CAMERA_HOLD (waiting SORT_DIR)");
+    Serial.println("[SENSOR] S6 → CAMERA_HOLD (soft stop + waiting SORT_DIR)");
 }
 
 void CameraHoldState::onExit(Context& ctx) {
@@ -50,6 +51,9 @@ void CameraHoldState::onLoop(Context& ctx) {
     // LED 초록 점멸
     ctx.led.updateBlink(config::timing::LED_BLINK_MS, 0, 1, 0);
 
+    // 소프트 스톱 감속 업데이트
+    ctx.dcMotor.updateSoftStop();
+
     // ★ 카메라 대기 중에도 이미 컨베이어를 탄 뒤의 분류기 동작은 독립 백그라운드로 수행
     ctx.processSorters(millis());
 
@@ -57,6 +61,7 @@ void CameraHoldState::onLoop(Context& ctx) {
     if (millis() - _enterMs >= config::timing::CAMERA_WAIT_MAX_MS) {
         ctx.cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
         ctx.s6.sync(); ctx.s6Prev = ctx.s6.isDetected();
+        ctx.mqtt.publish(config::mqtt::TOPIC_SENSOR, "CAMERA_TIMEOUT");
         Serial.println("[SENSOR] Camera hold TIMEOUT → CONVEYING + blanking");
         ctx.transition(&conveyingState);
     }
@@ -78,6 +83,15 @@ void CameraHoldState::onCommand(Context& ctx, const Command& cmd) {
                 dir == SortDir::LINE_1L ? "1L" : "2L", (int)ctx.dirQueue.size());
 
             // CAMERA_HOLD 해제 → CONVEYING
+            ctx.cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
+            ctx.s6.sync(); ctx.s6Prev = ctx.s6.isDetected();
+            ctx.transition(&conveyingState);
+            break;
+        }
+
+        case CommandType::SORT_DIR_WARN: {
+            // 미분류 상품: 큐에 넣지 않고 즉시 CONVEYING 복귀 (미분류로 통과)
+            Serial.println("[CMD] SORT_DIR:WARN → CONVEYING (no queue)");
             ctx.cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
             ctx.s6.sync(); ctx.s6Prev = ctx.s6.isDetected();
             ctx.transition(&conveyingState);

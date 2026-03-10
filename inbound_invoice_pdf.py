@@ -162,7 +162,12 @@ def build_qr_payload(order_id: int) -> str:
 
 
 def make_qr_image(payload: str, size_mm: float = 35) -> io.BytesIO:
-    qr = qrcode.QRCode(version=1, box_size=4, border=2)
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_H,
+        box_size=8,
+        border=4,
+    )
     qr.add_data(payload)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
