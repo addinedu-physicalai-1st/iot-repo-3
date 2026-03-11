@@ -61,7 +61,8 @@ namespace timing {
 }
 
 namespace queue {
-    constexpr int MAX_DIR_QUEUE_SIZE = 5;
+    /** dirQueue는 요소를 무조건 최대 1개만 유지 (S1 도달 전 연속 QR 시 타이밍 이슈 방지). */
+    constexpr int MAX_DIR_QUEUE_SIZE = 1;
 }
 
 namespace mqtt {

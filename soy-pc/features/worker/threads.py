@@ -334,3 +334,8 @@ class CameraQRThread(QThread):
 
     def stop(self):
         self._running = False
+
+    def reset_cooldown(self) -> None:
+        """CAMERA_DETECT 수신 시 호출 — 쿨다운 초기화로 즉시 QR 디코딩 가능."""
+        self._cooldown_until = 0
+        self._last_decoded = None

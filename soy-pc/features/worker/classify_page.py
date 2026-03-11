@@ -6,24 +6,18 @@ from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QFrame,
-    QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QPushButton,
-    QScrollArea,
-    QSlider,
     QSpinBox,
     QVBoxLayout,
     QTableWidgetItem,
 )
 
 from api import list_processes, process_update, list_inventory
-from features.worker.threads import UdpCameraThread, MqttSignalBridge
+from features.worker.threads import CameraQRThread, MqttSignalBridge
 from mqtt_client import mqtt_client
 from features.worker.process_controller import (
     FsmState,
@@ -85,7 +79,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     cam_col = QVBoxLayout()
     cam_col.setSpacing(6)
 
-    cam_preview = QLabel("카메라 대기")
+    cam_preview = QLabel("웹캠 대기")
     cam_preview.setFixedSize(320, 240)
     cam_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
     cam_preview.setStyleSheet(
@@ -93,76 +87,8 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     )
     cam_col.addWidget(cam_preview)
 
-    # ── 카메라 설정 토글 ──────────────────────────────────────
-    cam_settings_toggle = QPushButton("카메라 설정 ▼")
-    cam_settings_toggle.setFixedHeight(24)
-    cam_settings_toggle.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-    cam_col.addWidget(cam_settings_toggle)
-
-    cam_settings_group = QGroupBox()
-    cam_settings_group.setStyleSheet(
-        "QGroupBox { border: 1px solid #ccc; border-radius: 4px; padding: 4px; }"
-    )
-    cam_settings_group.setVisible(False)
-
-    cam_grid = QGridLayout(cam_settings_group)
-    cam_grid.setContentsMargins(4, 4, 4, 4)
-    cam_grid.setSpacing(4)
-
-    def _cam_cmd(key: str, val: int):
-        mqtt_client.publish(TOPIC_CONTROL, f"CAM:{key}:{val}")
-
-    def _add_cam_slider(grid, row, label, key, min_v, max_v, default):
-        lbl = QLabel(label)
-        lbl.setStyleSheet("font-size: 11px; border: none;")
-        slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setRange(min_v, max_v)
-        slider.setValue(default)
-        slider.setFixedWidth(120)
-        val_lbl = QLabel(str(default))
-        val_lbl.setFixedWidth(28)
-        val_lbl.setStyleSheet("font-size: 11px; border: none;")
-        slider.valueChanged.connect(
-            lambda v: (val_lbl.setText(str(v)), _cam_cmd(key, v))
-        )
-        grid.addWidget(lbl, row, 0)
-        grid.addWidget(slider, row, 1)
-        grid.addWidget(val_lbl, row, 2)
-        return slider
-
-    def _add_cam_check(grid, row, label, key, default):
-        cb = QCheckBox(label)
-        cb.setStyleSheet("font-size: 11px; border: none;")
-        cb.setChecked(default)
-        cb.toggled.connect(lambda v: _cam_cmd(key, 1 if v else 0))
-        grid.addWidget(cb, row, 0, 1, 3)
-        return cb
-
-    _add_cam_slider(cam_grid, 0, "JPEG 품질", "quality", 4, 63, 12)
-    _add_cam_slider(cam_grid, 1, "밝기", "brightness", -2, 2, 0)
-    _add_cam_slider(cam_grid, 2, "대비", "contrast", -2, 2, 0)
-    _add_cam_slider(cam_grid, 3, "채도", "saturation", -2, 2, 0)
-    _add_cam_slider(cam_grid, 4, "선명도", "sharpness", -2, 2, 0)
-    _add_cam_slider(cam_grid, 5, "노출 보정", "ae_level", -2, 2, 0)
-    _add_cam_slider(cam_grid, 6, "수동 노출", "aec_value", 0, 1200, 300)
-    _add_cam_slider(cam_grid, 7, "수동 게인", "agc_gain", 0, 30, 0)
-
-    _add_cam_check(cam_grid, 8, "자동 노출", "exposure_ctrl", True)
-    _add_cam_check(cam_grid, 9, "자동 게인", "gain_ctrl", True)
-    _add_cam_check(cam_grid, 10, "화이트밸런스", "whitebal", True)
-    _add_cam_check(cam_grid, 11, "좌우반전", "hmirror", False)
-    _add_cam_check(cam_grid, 12, "상하반전", "vflip", True)
-    _add_cam_check(cam_grid, 13, "렌즈 보정", "lenc", True)
-
-    cam_col.addWidget(cam_settings_group)
+    # 웹캠 사용 시 ESP32-CAM 설정 UI 없음
     cam_col.addStretch()
-
-    def _toggle_cam_settings():
-        vis = not cam_settings_group.isVisible()
-        cam_settings_group.setVisible(vis)
-        cam_settings_toggle.setText("카메라 설정 ▲" if vis else "카메라 설정 ▼")
-
-    cam_settings_toggle.clicked.connect(_toggle_cam_settings)
 
     monitor_layout.addLayout(cam_col)
 
@@ -479,21 +405,21 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     )
 
     def _on_camera_detect_reset(payload: str):
-        """CAMERA_DETECT 수신 시 UdpCameraThread 쿨다운 초기화."""
+        """CAMERA_DETECT 수신 시 웹캠 스레드 쿨다운 초기화."""
         if payload == "CAMERA_DETECT":
-            thread = _udp_cam_thread[0]
+            thread = _cam_thread[0]
             if thread:
                 thread.reset_cooldown()
 
     mqtt_bridge.sensor_received.connect(_on_camera_detect_reset)
 
-    # ── UDP 카메라 ───────────────────────────────────────────────
-    _udp_cam_thread: list[UdpCameraThread | None] = [None]
+    # ── 웹캠 카메라 ─────────────────────────────────────────────
+    _cam_thread: list[CameraQRThread | None] = [None]
 
     def _start_udp_camera():
-        if _udp_cam_thread[0] and _udp_cam_thread[0].isRunning():
+        if _cam_thread[0] and _cam_thread[0].isRunning():
             return
-        thread = UdpCameraThread(parent=window)
+        thread = CameraQRThread(parent=window)
 
         def on_frame(qimg: QImage):
             pix = QPixmap.fromImage(qimg)
@@ -508,16 +434,16 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         thread.frame_ready.connect(on_frame)
         thread.qr_decoded.connect(_on_classify_qr_decoded)
         thread.start()
-        _udp_cam_thread[0] = thread
+        _cam_thread[0] = thread
 
     def _stop_udp_camera():
-        thread = _udp_cam_thread[0]
+        thread = _cam_thread[0]
         if thread and thread.isRunning():
             thread.stop()
             thread.wait(3000)
-        _udp_cam_thread[0] = None
+        _cam_thread[0] = None
         cam_preview.clear()
-        cam_preview.setText("카메라 대기")
+        cam_preview.setText("웹캠 대기")
         cam_preview.setStyleSheet(
             "background: #222; color: #888; border: 1px solid #555; font-size: 13px;"
         )

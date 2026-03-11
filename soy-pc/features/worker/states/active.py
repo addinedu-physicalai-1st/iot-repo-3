@@ -9,6 +9,13 @@ states/active.py — ACTIVE 상태 (CONVEYING/CAMERA_HOLD/SORTING 포함).
   - CAMERA_TIMEOUT(QR 미인식)도 pending에 등록하여 작업자가 추적 가능
   - S5 미감지 시 → pending에 잔류 → 작업자가 센서 이상 등 확인
 
+1L 인식했는데 미분류로 카운팅되는 경우 (원인 검토):
+  - PC는 QR 인식 시 SORT_DIR:1L을 MQTT로 보내고, ESP32는 dirQueue에 적재 후 S1 감지 시마다
+    한 개씩 꺼내 서보 동작. 따라서 두 번째 1L이 S1에 도달하기 전에 두 번째 SORT_DIR:1L이
+    ESP32에 도착해야 1L대로 분류됨. MQTT 지연/컨베이어 속도로 두 번째 물품이 S1에 먼저 도달하면
+    큐가 비어 있어 서보 미동작 → 물품이 미분류대(S5)로 낙하 → S5 감지 시 미분류 카운팅.
+  - 대응: ESP32 쪽 dirQueue 유지, 컨베이어 속도 조절, 또는 물품 간격 확보.
+
 분류 대기 정리 규칙:
   - SORTED_UNCLASSIFIED 시: 해당 pending 제거 → station 플래그 정리
   - 모든 SORTED_* 후: pending/queue 모두 비어있으면 station 전부 초기화
@@ -152,7 +159,17 @@ class ActiveState(ProcessStateBase):
             # ★ S5 감지 시에만 미분류 카운팅
             removed_dir = None
             if controller._state.pending_items:
-                _, removed_dir = controller._state.pending_items.pop(0)
+                popped_code, removed_dir = controller._state.pending_items.pop(0)
+                logger.info(
+                    "[미분류] S5 감지 — pending에서 제거: code=%s direction=%s (남은 pending=%d)",
+                    popped_code,
+                    removed_dir,
+                    len(controller._state.pending_items),
+                )
+            else:
+                logger.info(
+                    "[미분류] S5 감지 — pending 비어있음, 미분류만 카운팅 (물품이 미분류대로 낙하)"
+                )
             controller._cb.on_pending_updated(list(controller._state.pending_items))
 
             # 해당 방향의 station 플래그 정리
@@ -314,6 +331,20 @@ class ActiveState(ProcessStateBase):
             logger.warning("[Controller] process_update error: %s", e)
             db_ok = False
         p[field_name] = new_qty
+
+        # 카운팅 시점 INFO 로그 (1L / 2L / 미분류)
+        kind = (
+            "1L"
+            if event == SensorEvent.SORTED_1L
+            else ("2L" if event == SensorEvent.SORTED_2L else "미분류")
+        )
+        logger.info(
+            "[카운팅] pid=%s %s → %d (db_ok=%s)",
+            pid,
+            kind,
+            new_qty,
+            db_ok,
+        )
 
         if event == SensorEvent.SORTED_UNCLASSIFIED:
             controller._cb.on_unclassified(new_qty, db_ok)
