@@ -111,6 +111,7 @@ class ProcessCallbacks(Protocol):
     def on_sorting_started(self, station: str) -> None: ...
     def on_sorting_ended(self, station: str) -> None: ...
     def on_pending_updated(self, items: list[tuple[str, str]]) -> None: ...
+    def on_expected_total_updated(self, count: int) -> None: ...
 
 
 # ── 공정 상태 구조체 ──────────────────────────────────────────
@@ -120,11 +121,12 @@ class ProcessState:
 
     process_id: int | None = None
     order_items: list[dict] = field(default_factory=list)
-    sort_queue: deque[str] = field(default_factory=deque)
+    sort_queue: deque[str] = field(default_factory=lambda: deque(maxlen=1))
     process_data: dict | None = None
     pending_items: list[tuple[str, str]] = field(default_factory=list)
     station_1l_active: bool = False
     station_2l_active: bool = False
+    expected_total_count: int = 0
 
     @property
     def is_active(self) -> bool:
@@ -139,6 +141,7 @@ class ProcessState:
         self.pending_items = []
         self.station_1l_active = False
         self.station_2l_active = False
+        self.expected_total_count = 0
 
 
 # ── 컨트롤러 ─────────────────────────────────────────────────
@@ -228,7 +231,7 @@ class ProcessController:
         logger.info("[공정시작] pid=%s", pid)
 
     def pause(self) -> None:
-        """공정 일시정지."""
+        """공정 일시정지. 예상 총량·대기 목록 등 상태는 초기화하지 않음."""
         if not self._state.is_active:
             return
         self._transition_to(self._paused_state)

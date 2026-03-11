@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # ── 설정 상수 ────────────────────────────────────────────────
 MIN_QR_INTERVAL_S: float = 1.5  # QR 등록 최소 간격 (초)
-MAX_SORT_QUEUE_SIZE: int = 5  # 분류 큐 최대 크기
+MAX_SORT_QUEUE_SIZE: int = 1  # 분류 큐 최대 크기 (1개만 유지, 새 항목 시 대체)
 
 
 class QrRejectReason(str, Enum):
@@ -77,8 +77,8 @@ class QrGate:
             logger.debug("[QrGate] REJECT: duplicate '%s'", code)
             return QrRejectReason.DUPLICATE
 
-        # ④ 큐 크기 제한
-        if current_queue_size >= MAX_SORT_QUEUE_SIZE:
+        # ④ 큐 크기 제한 (1개일 때는 대체 허용 — QUEUE_FULL 반환 안 함)
+        if current_queue_size > MAX_SORT_QUEUE_SIZE:
             logger.warning("[QrGate] REJECT: queue full (%d)", current_queue_size)
             return QrRejectReason.QUEUE_FULL
 

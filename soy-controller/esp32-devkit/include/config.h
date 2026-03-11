@@ -31,7 +31,7 @@ namespace dc {
     constexpr int LEDC_CHANNEL    = 0;
     constexpr int FREQ_HZ         = 5000;
     constexpr int RESOLUTION_BITS = 8;
-    constexpr int DEFAULT_SPEED   = 175;
+    constexpr int DEFAULT_SPEED   = 165;
     /** 위치센서(S6) 감지 시 DC 모터 소프트 정지 시간(ms). 클수록 천천히 정지. 0이면 즉시 정지. */
     constexpr unsigned long SOFT_STOP_DURATION_MS = 450;
 }

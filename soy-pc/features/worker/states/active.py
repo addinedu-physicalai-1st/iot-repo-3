@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 class ActiveState(ProcessStateBase):
     @property
     def name(self) -> str:
@@ -49,6 +48,8 @@ class ActiveState(ProcessStateBase):
 
         if item_code is None or not item_code.strip():
             controller._state.sort_queue.append(SortDirection.WARN.value)
+            controller._state.pending_items = [("(오류)", SortDirection.WARN.value)]
+            controller._cb.on_pending_updated(list(controller._state.pending_items))
             mqtt_client.publish(TOPIC_CONTROL, "SORT_DIR:WARN")
             controller._cb.on_qr_error("item_code 없음")
             return
@@ -71,9 +72,9 @@ class ActiveState(ProcessStateBase):
         # QR 게이트 통과 확정
         controller._qr_gate.accept(item_code)
 
-        # 큐 + 대기 목록 등록 (WARN 포함 — 모든 항목 추적)
+        # 큐 + 대기 목록 등록 (최대 1개만 유지, 새 항목 시 대체)
         controller._state.sort_queue.append(direction.value)
-        controller._state.pending_items.append((item_code, direction.value))
+        controller._state.pending_items = [(item_code, direction.value)]
         controller._cb.on_pending_updated(list(controller._state.pending_items))
 
         # ESP32에 방향 전송
@@ -95,11 +96,18 @@ class ActiveState(ProcessStateBase):
 
         if event == SensorEvent.CAMERA_DETECT:
             controller._qr_gate.open_camera_gate()
+            # 예상 총량: S6(카메라 위치) 감지 시 +1
+            controller._state.expected_total_count += 1
+            controller._cb.on_expected_total_updated(
+                controller._state.expected_total_count
+            )
             return
         elif event == SensorEvent.CAMERA_TIMEOUT:
-            # ★ QR 미인식 → pending에 등록하여 추적 (S5 감지 시 카운팅)
+            # ★ QR 미인식 → pending에 등록하여 추적 (S5 감지 시 카운팅, 최대 1개)
             controller._state.sort_queue.append(SortDirection.WARN.value)
-            controller._state.pending_items.append(("(미인식)", SortDirection.WARN.value))
+            controller._state.pending_items = [
+                ("(미인식)", SortDirection.WARN.value)
+            ]
             controller._cb.on_pending_updated(list(controller._state.pending_items))
             controller._cb.on_qr_error("카메라 타임아웃 — QR 미인식")
             logger.info("[CAMERA_TIMEOUT] QR 미인식 → pending 등록 (S5 대기)")

@@ -317,6 +317,13 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     )
     info_layout.addWidget(flow_label)
 
+    # ── 예상 총량 (S1 감지 기준, 카운팅 센서와 차이 확인용) ─────
+    expected_total_label = QLabel("예상 총량: 0")
+    expected_total_label.setStyleSheet(
+        "font-size: 12px; font-weight: bold; color: #555; border: none;"
+    )
+    info_layout.addWidget(expected_total_label)
+
     # ── 대기 목록 ──────────────────────────────────────────────
     pending_title = QLabel("대기 목록:")
     pending_title.setStyleSheet(
@@ -459,6 +466,9 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         def on_pending_updated(self, items: list[tuple[str, str]]) -> None:
             _update_pending_list(items)
 
+        def on_expected_total_updated(self, count: int) -> None:
+            expected_total_label.setText(f"예상 총량: {count}")
+
     _controller = ProcessController(_UiCallbacks())
 
     # ── MQTT 브릿지 ──────────────────────────────────────────────
@@ -552,6 +562,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         _update_station("1L", False)
         _update_station("2L", False)
         _update_pending_list([])
+        expected_total_label.setText("예상 총량: 0")
         warning_label.setText("경고: (없음)")
         warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
         dc_spin.setValue(_hw_dc_speed)
@@ -805,7 +816,6 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     worker.classifyStartButton.clicked.connect(_on_start_clicked)
     worker.classifyPauseButton.clicked.connect(_on_pause_clicked)
     worker.classifyStopButton.clicked.connect(_on_stop_clicked)
-    worker.classifyRefreshButton.clicked.connect(_refresh_classify_list)
 
     # ── 셀 직접 편집 ─────────────────────────────────────────────
     def on_classify_cell_changed(row: int, col: int):
