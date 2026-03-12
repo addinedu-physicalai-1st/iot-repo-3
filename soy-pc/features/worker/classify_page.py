@@ -1,6 +1,7 @@
 """분류하기 페이지 — HMI 스타일 모니터, 공정 테이블, 창고 차트, 공정 시작/중지."""
 
 import logging
+import time
 from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer
@@ -101,6 +102,13 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         "font-weight: bold; font-size: 14px; border: none;"
     )
     info_layout.addWidget(process_state_label)
+
+    # ── 작업시간 타이머 ────────────────────────────────────────
+    work_timer_label = QLabel("작업시간 00:00")
+    work_timer_label.setStyleSheet(
+        "font-size: 13px; font-weight: bold; color: #555; border: none;"
+    )
+    info_layout.addWidget(work_timer_label)
 
     # ── 분류대 패널 (1L / 2L) ─────────────────────────────────
     stations_row = QHBoxLayout()
@@ -339,6 +347,19 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     timer_servo_2l = QTimer(monitor_frame)
     timer_servo_2l.setSingleShot(True)
 
+    # 작업시간 타이머: 공정 시작 시 시작, 중지/완료 시 정지
+    work_start_time: list[float] = [0.0]  # 0 = 미가동
+
+    def _tick_work_timer() -> None:
+        if work_start_time[0] <= 0:
+            return
+        elapsed = int(time.time() - work_start_time[0])
+        m, s = divmod(elapsed, 60)
+        work_timer_label.setText(f"작업시간 {m:02d}:{s:02d}")
+
+    work_timer = QTimer(monitor_frame)
+    work_timer.timeout.connect(_tick_work_timer)
+
     # ── ProcessController + UI 콜백 ──────────────────────────────
     class _UiCallbacks:
         def on_fsm_state_changed(self, state: FsmState) -> None:
@@ -369,6 +390,9 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         def on_process_started(self, pid: int) -> None:
             worker.classifyResultLabel.setText("공정을 시작했습니다.")
             _update_buttons("RUNNING")
+            work_start_time[0] = time.time()
+            work_timer_label.setText("작업시간 00:00")
+            work_timer.start(1000)
 
         def on_process_paused(self) -> None:
             worker.classifyResultLabel.setText("공정을 일시정지했습니다.")
@@ -379,6 +403,12 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
             _update_buttons("RUNNING")
 
         def on_process_stopped(self, pid: int) -> None:
+            work_timer.stop()
+            if work_start_time[0] > 0:
+                elapsed = int(time.time() - work_start_time[0])
+                m, s = divmod(elapsed, 60)
+                work_timer_label.setText(f"작업시간 {m:02d}:{s:02d}")
+            work_start_time[0] = 0.0
             _stop_udp_camera()
             _reset_monitor()
             _update_buttons("IDLE")
@@ -387,6 +417,12 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         def on_process_completed(
             self, pid: int, sorted_total: int, order_total: int
         ) -> None:
+            work_timer.stop()
+            if work_start_time[0] > 0:
+                elapsed = int(time.time() - work_start_time[0])
+                m, s = divmod(elapsed, 60)
+                work_timer_label.setText(f"작업시간 {m:02d}:{s:02d}")
+            work_start_time[0] = 0.0
             _stop_udp_camera()
             _reset_monitor()
             _refresh_classify_list()
