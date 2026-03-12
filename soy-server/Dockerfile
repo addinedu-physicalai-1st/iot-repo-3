@@ -11,9 +11,7 @@ COPY soy-server/ ./soy-server/
 RUN pip install --no-cache-dir fastapi "uvicorn[standard]" alembic sqlalchemy pymysql bcrypt pyserial \
     && python -c "import serial; print('pyserial OK')"
 
-RUN chmod +x /app/soy-server/entrypoint.sh
-
 EXPOSE 8000 9001
 
-# 기동 시 마이그레이션 적용 후 uvicorn 실행
-CMD ["/app/soy-server/entrypoint.sh"]
+# 기동 시 마이그레이션 적용 후 uvicorn 실행 (sh로 실행해 볼륨 마운트 시 실행권한 없어도 동작)
+CMD ["sh", "/app/soy-server/entrypoint.sh"]

@@ -1,13 +1,19 @@
 """
 soy-server TCP 클라이언트. Worker CRUD + card_read 푸시 수신.
 환경변수: SOY_SERVER_HOST(기본 127.0.0.1), SOY_SERVER_TCP_PORT(기본 9001).
+TCP: 길이 프리픽스 프레임 [4바이트 BE 길이][payload UTF-8 JSON].
 """
+
 import json
 import logging
 import os
 import socket
+import struct
 import threading
 from typing import Any, Callable
+
+# 서버와 동일: 헤더 4바이트(big-endian uint32) = payload 길이. 최대 1MB.
+MAX_FRAME_PAYLOAD = 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +26,7 @@ _TIMEOUT = 10.0
 def get_server_address() -> str:
     """soy-pc가 연결하는 서버 주소(host:port). 에러 메시지 등에 사용."""
     return f"{_HOST}:{_PORT}"
+
 
 _socket: socket.socket | None = None
 _socket_lock = threading.Lock()
@@ -51,6 +58,40 @@ def _next_id() -> int:
     with _id_lock:
         _request_id += 1
         return _request_id
+
+
+def _read_exact(s: socket.socket, n: int) -> bytes | None:
+    """소켓에서 정확히 n바이트 읽기. 끊김/오류 시 None."""
+    buf = b""
+    while len(buf) < n:
+        try:
+            chunk = s.recv(min(4096, n - len(buf)))
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            return None
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
+def _read_frame(s: socket.socket) -> bytes | None:
+    """헤더(4바이트) 읽고 payload 길이만큼 읽어 반환. 끊김/오류/초과 시 None."""
+    header = _read_exact(s, 4)
+    if header is None or len(header) != 4:
+        return None
+    (length,) = struct.unpack(">I", header)
+    if length == 0 or length > MAX_FRAME_PAYLOAD:
+        return None
+    return _read_exact(s, length)
+
+
+def _send_frame(s: socket.socket, payload: bytes) -> bool:
+    """payload 앞에 4바이트 길이 헤더 붙여 전송. 실패 시 False."""
+    try:
+        s.sendall(struct.pack(">I", len(payload)) + payload)
+        return True
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        return False
 
 
 def _ensure_connected() -> socket.socket:
@@ -100,59 +141,49 @@ def _ensure_connected() -> socket.socket:
 
 
 def _reader_loop() -> None:
-    """한 줄씩 읽어 response면 pending에 넣고, card_read면 콜백. buf는 유지해 잘린 메시지 손실 방지."""
+    """길이 프리픽스 프레임으로 한 메시지씩 읽어 response면 pending에, card_read면 콜백."""
     global _socket
-    buf = b""
     while _reader_running.is_set():
         try:
             s = _socket
             if s is None:
                 break
-            try:
-                chunk = s.recv(4096)
-            except (ConnectionResetError, BrokenPipeError, OSError):
-                chunk = b""
-            if not chunk:
+            payload = _read_frame(s)
+            if payload is None:
                 break
-            buf += chunk
-            # 한 줄씩 처리 (나머지는 buf에 유지)
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line_str = line.decode("utf-8", errors="ignore").strip()
-                if not line_str:
-                    continue
-                try:
-                    msg = json.loads(line_str)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(msg, dict):
-                    continue
-                if msg.get("type") == "response":
-                    rid = msg.get("id")
-                    ok = msg.get("ok", False)
-                    body = msg.get("body")
-                    err = msg.get("error") or ""
-                    with _pending_lock:
-                        if rid in _pending:
-                            ev, res = _pending.pop(rid)
-                            res.append((ok, body, err))
-                            ev.set()
-                elif msg.get("type") == "card_read":
-                    uid = msg.get("uid") or ""
-                    logger.info("[RFID] card_read received from server uid=%r callback=%s", uid, _card_read_callback is not None)
-                    if uid and _card_read_callback:
-                        try:
-                            _card_read_callback(uid)
-                            logger.info("[RFID] card_read callback done uid=%r", uid)
-                        except Exception as e:
-                            logger.warning("[RFID] card_read callback error: %s", e)
-                    elif not uid:
-                        logger.warning("[RFID] card_read ignored: uid empty")
-                    else:
-                        logger.warning("[RFID] card_read ignored: no callback registered")
-            # 버퍼 비정상 증가 방지 (한 줄은 보통 수백 바이트 미만)
-            if len(buf) > 65536:
-                buf = b""
+            try:
+                msg = json.loads(payload.decode("utf-8", errors="strict"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("type") == "response":
+                rid = msg.get("id")
+                ok = msg.get("ok", False)
+                body = msg.get("body")
+                err = msg.get("error") or ""
+                with _pending_lock:
+                    if rid in _pending:
+                        ev, res = _pending.pop(rid)
+                        res.append((ok, body, err))
+                        ev.set()
+            elif msg.get("type") == "card_read":
+                uid = msg.get("uid") or ""
+                logger.info(
+                    "[RFID] card_read received from server uid=%r callback=%s",
+                    uid,
+                    _card_read_callback is not None,
+                )
+                if uid and _card_read_callback:
+                    try:
+                        _card_read_callback(uid)
+                        logger.info("[RFID] card_read callback done uid=%r", uid)
+                    except Exception as e:
+                        logger.warning("[RFID] card_read callback error: %s", e)
+                elif not uid:
+                    logger.warning("[RFID] card_read ignored: uid empty")
+                else:
+                    logger.warning("[RFID] card_read ignored: no callback registered")
         except Exception:
             break
     with _socket_lock:
@@ -198,7 +229,12 @@ def _request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
     body = dict(body)
     with _auth_token_lock:
         tok = _auth_token
-    if tok and action != "admin_login":
+    # 인증 불필요 액션에는 auth_token 붙이지 않음
+    if tok and action not in (
+        "admin_login",
+        "first_admin_needs_password",
+        "register_first_admin",
+    ):
         body["auth_token"] = tok
     req_id = _next_id()
     ev = threading.Event()
@@ -208,7 +244,9 @@ def _request(action: str, body: dict[str, Any]) -> tuple[bool, Any, str]:
     try:
         sock = _ensure_connected()
         req = {"type": "request", "id": req_id, "action": action, "body": body}
-        sock.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8"))
+        payload = json.dumps(req, ensure_ascii=False).encode("utf-8")
+        if not _send_frame(sock, payload):
+            raise ConnectionError("Send failed")
     except Exception as e:
         with _pending_lock:
             _pending.pop(req_id, None)
@@ -239,6 +277,16 @@ def admin_count() -> int:
     return 0
 
 
+def first_admin_needs_password() -> bool:
+    """첫 번째 admin에 비밀번호가 없으면 True (초기 설정 팝업 표시용)."""
+    ok, body, err = _request("first_admin_needs_password", {})
+    if not ok:
+        raise RuntimeError(err or "first_admin_needs_password failed")
+    if body is not None and isinstance(body, dict) and "needs_password" in body:
+        return bool(body["needs_password"])
+    return False
+
+
 def register_first_admin(password: str) -> None:
     """최초 관리자 등록(비밀번호). 이미 있거나 실패 시 예외."""
     ok, _, err = _request("register_first_admin", {"password": password.strip()})
@@ -267,6 +315,63 @@ def list_workers() -> list[dict]:
     if body is None:
         return []
     return body if isinstance(body, list) else []
+
+
+def list_access_logs(
+    limit: int = 500, worker_name: str | None = None
+) -> list[dict]:
+    """출입 로그 목록 (최신순). worker_name이 있으면 작업자 이름으로 필터. 관리자 로그인 필요."""
+    req_body: dict = {"limit": limit}
+    if worker_name is not None and str(worker_name).strip():
+        req_body["worker_name"] = str(worker_name).strip()
+    ok, res, err = _request("list_access_logs", req_body)
+    if not ok:
+        raise RuntimeError(err or "list_access_logs failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
+def list_inventory() -> list[dict]:
+    """창고 재고 목록 (관리자 로그인 필요)."""
+    ok, res, err = _request("list_inventory", {})
+    if not ok:
+        raise RuntimeError(err or "list_inventory failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
+def list_inventory_status_stats() -> list[dict]:
+    """재고 현황 통계: brand × category × inventory_id 별 건수 (관리자 로그인 필요)."""
+    ok, res, err = _request("list_inventory_status_stats", {})
+    if not ok:
+        raise RuntimeError(err or "list_inventory_status_stats failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
+
+
+def list_item_sorting_logs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    search_text: str | None = None,
+) -> list[dict]:
+    """작업 로그 목록 조회 (관리자 로그인 필요)."""
+    req_body: dict = {}
+    if start_date:
+        req_body["start_date"] = start_date
+    if end_date:
+        req_body["end_date"] = end_date
+    if search_text:
+        req_body["search_text"] = search_text
+
+    ok, res, err = _request("list_item_sorting_logs", req_body)
+    if not ok:
+        raise RuntimeError(err or "list_item_sorting_logs failed")
+    if res is None:
+        return []
+    return res if isinstance(res, list) else []
 
 
 def create_worker(admin_id: int, name: str, card_uid: str) -> dict:
@@ -308,3 +413,110 @@ def delete_worker(worker_id: int) -> None:
         if "not found" in (err or "").lower() or "찾을 수 없" in (err or ""):
             raise WorkerNotFound()
         raise RuntimeError(err or "delete_worker failed")
+
+
+# ----- 주문/입고 (작업자 화면 주문 관리, 인증 불필요) -----
+
+
+def list_orders() -> list[dict]:
+    """주문 목록 조회. 각 항목에 order_id, order_date, status, items 포함."""
+    ok, body, err = _request("list_orders", {})
+    if not ok:
+        raise RuntimeError(err or "주문 목록 조회 실패")
+    return body if isinstance(body, list) else []
+
+
+def get_order(order_id: int) -> dict:
+    """주문 조회. 없으면 RuntimeError."""
+    ok, body, err = _request("get_order", {"order_id": order_id})
+    if not ok:
+        raise RuntimeError(err or "주문 조회 실패")
+    return body or {}
+
+
+def get_order_id_by_order_item_id(order_item_id: int) -> int:
+    """order_item_id로 order_id 조회. 없으면 RuntimeError."""
+    ok, body, err = _request(
+        "get_order_id_by_order_item_id", {"order_item_id": order_item_id}
+    )
+    if not ok:
+        raise RuntimeError(err or "주문 상세 조회 실패")
+    if body and isinstance(body, dict) and "order_id" in body:
+        return int(body["order_id"])
+    raise RuntimeError("order_id not in response")
+
+
+def order_mark_delivered(
+    *, order_id: int | None = None, order_item_id: int | None = None
+) -> dict:
+    """주문을 입고 처리(pending → delivered). order_id 또는 order_item_id 중 하나 지정.
+    이미 delivered면 RuntimeError(메시지에 '이미 입고한 주문')."""
+    body: dict[str, Any] = {}
+    if order_id is not None:
+        body["order_id"] = order_id
+    if order_item_id is not None:
+        body["order_item_id"] = order_item_id
+    if not body:
+        raise ValueError("order_id 또는 order_item_id 필요")
+    ok, res, err = _request("order_mark_delivered", body)
+    if not ok:
+        raise RuntimeError(err or "입고 처리 실패")
+    return res or {}
+
+
+def order_set_status(order_id: int, status: str) -> dict:
+    """주문 상태를 PENDING/DELIVERED로 변경."""
+    ok, res, err = _request(
+        "order_set_status", {"order_id": int(order_id), "status": str(status).upper()}
+    )
+    if not ok:
+        raise RuntimeError(err or "주문 상태 변경 실패")
+    return res or {}
+
+
+# ----- 공정(분류하기) -----
+
+
+def list_processes() -> list[dict]:
+    """공정 목록 (process_id 내림차순)."""
+    ok, body, err = _request("list_processes", {})
+    if not ok:
+        raise RuntimeError(err or "공정 목록 조회 실패")
+    return body if isinstance(body, list) else []
+
+
+def process_start(process_id: int) -> dict:
+    """공정 시작. 한 번에 하나만 RUNNING. 없으면 RuntimeError."""
+    ok, body, err = _request("process_start", {"process_id": process_id})
+    if not ok:
+        raise RuntimeError(err or "공정 시작 실패")
+    return body or {}
+
+
+def process_stop(process_id: int) -> dict:
+    """공정 중지. 없으면 RuntimeError."""
+    ok, body, err = _request("process_stop", {"process_id": process_id})
+    if not ok:
+        raise RuntimeError(err or "공정 중지 실패")
+    return body or {}
+
+
+def process_update(
+    process_id: int,
+    *,
+    success_1l_qty: int | None = None,
+    success_2l_qty: int | None = None,
+    unclassified_qty: int | None = None,
+) -> dict:
+    """공정 수량(1L, 2L, 미분류) 갱신. None인 필드는 변경하지 않음."""
+    body: dict[str, Any] = {"process_id": process_id}
+    if success_1l_qty is not None:
+        body["success_1l_qty"] = success_1l_qty
+    if success_2l_qty is not None:
+        body["success_2l_qty"] = success_2l_qty
+    if unclassified_qty is not None:
+        body["unclassified_qty"] = unclassified_qty
+    ok, res, err = _request("process_update", body)
+    if not ok:
+        raise RuntimeError(err or "공정 수량 갱신 실패")
+    return res or {}

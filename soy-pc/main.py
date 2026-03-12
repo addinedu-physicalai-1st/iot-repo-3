@@ -1,19 +1,29 @@
+import atexit
 import logging
 import os
+import signal
 import sys
 import traceback
 
 from PyQt6 import uic
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit, QStackedLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QLineEdit,
+    QPlainTextEdit,
+    QStackedLayout,
+    QVBoxLayout,
+    QWidget,
+)
 
 from qfluentwidgets import FluentWidget, setTheme, setThemeColor, Theme
 
 from features.admin_registration import ensure_admin_registered
 from features.admin_screen import setup_admin_screen
 from features.lock_screen import setup_lock_screen
-from features.worker_screen import setup_worker_screen
+from features.worker import setup_worker_screen
+from mqtt_client import mqtt_client
 from theme import BG_MAIN, FACTORY_STYLESHEET
 
 
@@ -30,7 +40,9 @@ def _setup_global_ime(app: QApplication) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s"
+    )
     logging.getLogger("api").setLevel(logging.INFO)
 
     app = QApplication(sys.argv)
@@ -44,7 +56,7 @@ def main() -> None:
 
     window = FluentWidget()
     window.setWindowTitle("Soy-PC")
-    window.resize(800, 600)
+    window.resize(1100, 750)
     window.setMicaEffectEnabled(False)
     window.setCustomBackgroundColor(QColor(BG_MAIN), QColor(BG_MAIN))
 
@@ -79,12 +91,36 @@ def main() -> None:
     setup_worker_screen(window, stacked)
     setup_admin_screen(window, stacked, ui_dir)
 
+    # MQTT 브로커 연결 (IoT 제어)
+    mqtt_client.connect()
+
+    # ── CleanShutdown 프로토콜 ─────────────────────────────────
+    # 프로그램 비정상 종료 시에도 ESP32에 SORT_STOP을 보내고 MQTT 정리
+    _shutdown_done = False
+
+    def _emergency_cleanup(*_args) -> None:
+        nonlocal _shutdown_done
+        if _shutdown_done:
+            return
+        _shutdown_done = True
+        try:
+            mqtt_client.publish("device/control", "SORT_STOP")
+        except Exception:
+            pass
+        mqtt_client.disconnect()
+
+    atexit.register(_emergency_cleanup)
+    signal.signal(signal.SIGTERM, lambda *_: (_emergency_cleanup(), sys.exit(0)))
+    # SIGINT는 KeyboardInterrupt로 처리되므로 atexit에서 커버됨
+
     window.show()
 
     while not ensure_admin_registered(ui_dir, window):
         pass
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    _emergency_cleanup()  # 정상 종료 시에도 정리
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

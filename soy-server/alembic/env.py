@@ -1,12 +1,15 @@
 """
 Alembic env — DB URL은 환경변수 사용.
   SOY_DATABASE_URL 또는 MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
+ORM Base.metadata 연결로 향후 autogenerate 시 참조.
 """
 import os
 from logging.config import fileConfig
 
 from sqlalchemy import create_engine
 from alembic import context
+
+from app.models import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -35,7 +38,10 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = create_engine(get_url())
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=None)
+        context.configure(
+            connection=connection,
+            target_metadata=Base.metadata,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

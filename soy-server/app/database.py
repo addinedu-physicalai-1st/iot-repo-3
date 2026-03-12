@@ -1,9 +1,16 @@
 """
 DB 연결. 환경변수 SOY_DATABASE_URL 또는 MYSQL_* 사용 (alembic/env와 동일).
+Engine + ORM Session 제공.
 """
 import os
+from contextlib import contextmanager
+from typing import Generator
+
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.models import Base
 
 _env = os.environ
 
@@ -21,6 +28,7 @@ def _get_url() -> str:
 
 
 _engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
 
 
 def get_engine() -> Engine:
@@ -28,3 +36,32 @@ def get_engine() -> Engine:
     if _engine is None:
         _engine = create_engine(_get_url(), pool_pre_ping=True)
     return _engine
+
+
+def get_session_factory() -> sessionmaker[Session]:
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(
+            autocommit=False,
+            autoflush=True,
+            bind=get_engine(),
+        )
+    return _SessionLocal
+
+
+@contextmanager
+def get_session() -> Generator[Session, None, None]:
+    """
+    ORM 세션 컨텍스트. 한 번의 with 블록 = 한 트랜잭션.
+    - 정상 종료: session.commit() → 트랜잭션 커밋 (모든 변경 한 번에 반영).
+    - 예외 시: session.rollback() → 트랜잭션 롤백 (모든 변경 취소).
+    """
+    session = get_session_factory()()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

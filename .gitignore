@@ -56,3 +56,7 @@ logs/
 # Local overrides (soy-db 등)
 docker-compose.override.yml
 *.local.yml
+
+# MQTTmosquitto
+mosquitto/data
+mosquitto/log

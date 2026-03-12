@@ -72,6 +72,7 @@ QPushButton:disabled {{
 }}
 QLabel {{
   color: {TEXT_PRIMARY};
+  background-color: transparent;
 }}
 QLineEdit {{
   background-color: {BG_CARD};
@@ -218,42 +219,170 @@ QWidget#LockScreen QPushButton#adminModeButton:hover {{
 QWidget#WorkerScreen {{
   background-color: {BG_MAIN};
 }}
-QWidget#WorkerScreen QLabel#label_workerTitle {{
-  color: {TEXT_PRIMARY};
-  font-size: 18px;
-  font-weight: bold;
-}}
-QWidget#WorkerScreen QPushButton#backButton {{
-  background-color: {BG_BUTTON};
-  color: {TEXT_PRIMARY};
-}}
-
-/* ========== 관리자 화면 (사이드바 + 콘텐츠) ========== */
-QWidget#AdminScreen {{
-  background-color: {BG_MAIN};
-}}
-/* 사이드바 */
-QWidget#AdminScreen QFrame#admin_sidebar {{
-  background-color: {BG_CARD};
+QWidget#WorkerScreen QFrame#worker_sidebar {{
+  background-color: transparent;
   border-right: 1px solid {BORDER};
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QLabel#label_menuTitle {{
-  color: {TEXT_SECONDARY};
-  font-size: 11px;
+QWidget#WorkerScreen QFrame#worker_sidebar QLabel#label_worker_menuTitle {{
+  color: {TEXT_PRIMARY};
+  font-size: 20px;
   font-weight: bold;
+  padding: 12px 0 8px 0;
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_warehouse {{
   background-color: transparent;
   color: {TEXT_PRIMARY};
   border: none;
   border-radius: 6px;
   text-align: left;
-  padding: 8px 12px;
+  padding: 10px 12px;
+  font-size: 16px;
+  margin-top: 4px;
+  margin-bottom: 4px;
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:hover {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:hover,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:hover,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_warehouse:hover {{
   background-color: {BG_BUTTON};
 }}
-QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:checked {{
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_inbound:checked,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_classify:checked,
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#menu_warehouse:checked {{
+  background-color: {ACCENT_SOFT};
+  color: {ACCENT_HOVER};
+  font-weight: 600;
+}}
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#backButton {{
+  background-color: {BG_BUTTON};
+  color: {TEXT_PRIMARY};
+  border: 1px solid {BORDER};
+  border-radius: 6px;
+  font-size: 15px;
+  margin-top: 8px;
+}}
+QWidget#WorkerScreen QFrame#worker_sidebar QPushButton#backButton:hover {{
+  background-color: {BORDER};
+}}
+/* 작업자 메인(환영) 화면 카드 */
+QWidget#WorkerScreen QFrame#welcome_card {{
+  background-color: {BG_CARD};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+}}
+QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_title {{
+  color: {TEXT_PRIMARY};
+  font-size: 28px;
+  font-weight: bold;
+}}
+QWidget#WorkerScreen QFrame#welcome_card QLabel#label_welcome_hint {{
+  color: {TEXT_SECONDARY};
+  font-size: 15px;
+}}
+/* 창고 현황 — 막대 그래프 카드 */
+QWidget#WorkerScreen QFrame#warehouse_chart_card {{
+  background-color: {BG_CARD};
+  border: 1px solid {BORDER};
+  border-radius: 12px;
+}}
+/* 창고 현황 — 프로그레스 바: 회색 10칸 배경 위에 색이 차오르는 스타일 */
+QWidget#WorkerScreen QFrame#warehouse_chart_card QProgressBar {{
+  background-color: #d8d6d2;
+  border: none;
+  border-radius: 10px;
+  min-height: 44px;
+  text-align: center;
+}}
+QWidget#WorkerScreen QFrame#warehouse_chart_card QProgressBar::chunk {{
+  background-color: {ACCENT};
+  border-radius: 10px;
+}}
+/* 분류하기 — 공정 목록 테이블 (관리자 작업자 테이블과 동일 스타일) */
+QWidget#WorkerScreen QTableWidget {{
+  background-color: {BG_CARD};
+  border: 1px solid {BORDER};
+  border-radius: 8px;
+  gridline-color: {BORDER};
+}}
+QWidget#WorkerScreen QTableWidget::item {{
+  padding: 8px 12px;
+  color: {TEXT_PRIMARY};
+}}
+QWidget#WorkerScreen QTableWidget::item:selected {{
+  background-color: {ACCENT_SOFT};
+  color: {TEXT_PRIMARY};
+}}
+QWidget#WorkerScreen QTableWidget QHeaderView::section {{
+  background-color: {BG_BUTTON};
+  color: {TEXT_SECONDARY};
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 2px solid {BORDER};
+  border-right: 1px solid {BORDER};
+  font-weight: 600;
+}}
+QWidget#WorkerScreen QTableWidget QHeaderView::section:last {{
+  border-right: none;
+}}
+/* 분류하기 — 셀 편집 시 나타나는 입력창: 글자 대비 확보 */
+QWidget#WorkerScreen QTableWidget QLineEdit {{
+  background-color: {BG_CARD};
+  color: {TEXT_PRIMARY};
+  border: 1px solid {BORDER};
+  padding: 6px 10px;
+  selection-background-color: {ACCENT_SOFT};
+  selection-color: {TEXT_PRIMARY};
+}}
+
+/* ========== 관리자 화면 (사이드바 + 콘텐츠) — 작업자 화면 사이드바와 동일 스타일 ========== */
+QWidget#AdminScreen {{
+  background-color: {BG_MAIN};
+}}
+/* 사이드바 */
+QWidget#AdminScreen QFrame#admin_sidebar {{
+  background-color: transparent;
+  border-right: 1px solid {BORDER};
+}}
+QWidget#AdminScreen QFrame#admin_sidebar QLabel#label_menuTitle {{
+  color: {TEXT_PRIMARY};
+  font-size: 20px;
+  font-weight: bold;
+  padding: 12px 0 8px 0;
+}}
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_item_sorting_log,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_report,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_status,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_expiration_stats,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_work_status {{
+  background-color: transparent;
+  color: {TEXT_PRIMARY};
+  border: none;
+  border-radius: 6px;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 16px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}}
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_item_sorting_log:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_report:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_status:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_expiration_stats:hover,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_work_status:hover {{
+  background-color: {BG_BUTTON};
+}}
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_worker_management:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_access_log:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_item_sorting_log:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_report:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_inventory_status:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_expiration_stats:checked,
+QWidget#AdminScreen QFrame#admin_sidebar QPushButton#menu_work_status:checked {{
   background-color: {ACCENT_SOFT};
   color: {ACCENT_HOVER};
   font-weight: 600;
@@ -263,6 +392,8 @@ QWidget#AdminScreen QFrame#admin_sidebar QPushButton#backButton {{
   color: {TEXT_PRIMARY};
   border: 1px solid {BORDER};
   border-radius: 6px;
+  font-size: 15px;
+  margin-top: 8px;
 }}
 QWidget#AdminScreen QFrame#admin_sidebar QPushButton#backButton:hover {{
   background-color: {BORDER};

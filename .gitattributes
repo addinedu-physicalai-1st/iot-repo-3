@@ -1,0 +1,2 @@
+# 셸 스크립트는 항상 LF. 다른 PC에서 CRLF로 체크아웃되면 entrypoint.sh "set: Illegal option" 발생
+*.sh text eol=lf
