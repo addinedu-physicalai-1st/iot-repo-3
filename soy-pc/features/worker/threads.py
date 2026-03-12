@@ -295,6 +295,13 @@ class CameraQRThread(QThread):
             if not cap.isOpened():
                 logger.warning("Camera open failed")
                 return
+            w_cam = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h_cam = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps_cam = cap.get(cv2.CAP_PROP_FPS)
+            logger.info(
+                "[CameraQR] 웹캠 기본 해상도=%dx%d, FPS=%.1f",
+                w_cam, h_cam, fps_cam,
+            )
             while self._running and cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
