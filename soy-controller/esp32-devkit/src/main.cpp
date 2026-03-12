@@ -87,7 +87,7 @@ void setup() {
     led.begin(config::pin::LED_R, config::pin::LED_G, config::pin::LED_B);
 
     // 근접 센서 6개
-    s1.begin(config::pin::SORT_POS_1L,      config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
+    s1.begin(config::pin::SORT_POS_1L, 0, config::sensor::DEBOUNCE_S1_MS, true, true);  // S6와 동일 종류, 더 민감(디바운스 짧음)
     s2.begin(config::pin::SORT_POS_2L,      config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s3.begin(config::pin::SORT_CONFIRM_1L,  config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
     s4.begin(config::pin::SORT_CONFIRM_2L,  config::sensor::THRESHOLD, config::sensor::DEBOUNCE_MS);
@@ -127,11 +127,9 @@ void loop() {
         static unsigned long lastDbg = 0;
         unsigned long now = millis();
         if (now - lastDbg >= 1000) {
-            Serial.printf("[DBG] S1=%d S2=%d S3=%d S4=%d S5=%d S6=%d  q=%d  state=%s  sA=%d sB=%d p2L=%d\n",
+            Serial.printf("[DBG] S1=%d S2=%d S3=%d S4=%d S5=%d S6=%d  state=%s\n",
                 s1.readRaw(), s2.readRaw(), s3.readRaw(), s4.readRaw(), s5.readRaw(), s6.readRaw(),
-                (int)ctx.dirQueue.size(),
-                ctx.currentState ? ctx.currentState->name() : "NULL",
-                ctx.servoASorting, ctx.servoBSorting, ctx.pending2L);
+                ctx.currentState ? ctx.currentState->name() : "NULL");
             lastDbg = now;
         }
     }

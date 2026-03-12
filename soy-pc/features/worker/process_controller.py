@@ -14,7 +14,6 @@ GUI 코드와 분리. classify_page.py에서 콜백(ProcessCallbacks)으로 UI �
 import json
 import logging
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol
@@ -64,17 +63,16 @@ class FsmState(str, Enum):
 
 
 class SensorEvent(str, Enum):
-    """device/sensor 이벤트 타입."""
+    """device/sensor 이벤트 타입. ESP32는 센서만 보고, 서보 개폐는 PC가 판단 후 명령."""
 
     PROXIMITY_ON = "PROXIMITY:1"
     PROXIMITY_OFF = "PROXIMITY:0"
     CAMERA_DETECT = "CAMERA_DETECT"
-    DETECTED = "DETECTED"
-    SORTING_1L = "SORTING_1L"
-    SORTING_2L = "SORTING_2L"
-    SORTED_1L = "SORTED_1L"
-    SORTED_2L = "SORTED_2L"
-    SORTED_UNCLASSIFIED = "SORTED_UNCLASSIFIED"
+    S1_DETECTED = "S1_DETECTED"
+    S2_DETECTED = "S2_DETECTED"
+    S3_DETECTED = "S3_DETECTED"  # 카운팅: PC가 1L로 카운트
+    S4_DETECTED = "S4_DETECTED"  # 카운팅: PC가 2L로 카운트
+    S5_DETECTED = "S5_DETECTED"  # 카운팅: PC가 미분류로 카운트
     CAMERA_TIMEOUT = "CAMERA_TIMEOUT"
     SORT_TIMEOUT_1L = "SORT_TIMEOUT:1L"
     SORT_TIMEOUT_2L = "SORT_TIMEOUT:2L"
@@ -110,20 +108,26 @@ class ProcessCallbacks(Protocol):
     def on_error(self, message: str) -> None: ...
     def on_sorting_started(self, station: str) -> None: ...
     def on_sorting_ended(self, station: str) -> None: ...
-    def on_pending_updated(self, items: list[tuple[str, str]]) -> None: ...
+    def on_open_servo_1l(self) -> None: ...
+    def on_open_servo_2l(self) -> None: ...
+    def on_center_servo_1l(self) -> None: ...
+    def on_center_servo_2l(self) -> None: ...
+    def on_current_item_updated(
+        self, current_item: tuple[str, str] | None
+    ) -> None: ...
     def on_expected_total_updated(self, count: int) -> None: ...
 
 
 # ── 공정 상태 구조체 ──────────────────────────────────────────
 @dataclass
 class ProcessState:
-    """현재 진행 중인 공정의 실시간 상태."""
+    """현재 진행 중인 공정의 실시간 상태. 분류는 한 번에 한 개만(dirQueue 1개)."""
 
     process_id: int | None = None
     order_items: list[dict] = field(default_factory=list)
-    sort_queue: deque[str] = field(default_factory=lambda: deque(maxlen=1))
     process_data: dict | None = None
-    pending_items: list[tuple[str, str]] = field(default_factory=list)
+    # 한 번에 한 개만: (item_code, direction) 또는 None. SORTED_* 수신 시 클리어.
+    current_item: tuple[str, str] | None = None
     station_1l_active: bool = False
     station_2l_active: bool = False
     expected_total_count: int = 0
@@ -136,9 +140,8 @@ class ProcessState:
         """모든 상태 완전 초기화 — CleanShutdown."""
         self.process_id = None
         self.order_items = []
-        self.sort_queue.clear()
         self.process_data = None
-        self.pending_items = []
+        self.current_item = None
         self.station_1l_active = False
         self.station_2l_active = False
         self.expected_total_count = 0
@@ -283,6 +286,12 @@ class ProcessController:
     def handle_qr(self, item_code: str | None) -> None:
         """QR 인식 → 현재 상태에 위임."""
         self._current_state.handle_qr(self, item_code)
+
+    def handle_servo_timeout(
+        self, station: str, processes: list[dict]
+    ) -> None:
+        """서보 개방 후 2초 내 카운팅 없음(타이머 만료) → 현재 상태에 위임."""
+        self._current_state.handle_servo_timeout(self, station, processes)
 
     # ── 유틸리티 ──────────────────────────────────────────────
 

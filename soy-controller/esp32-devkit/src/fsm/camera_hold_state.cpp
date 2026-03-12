@@ -6,6 +6,7 @@
 #include "command.h"
 #include "config.h"
 #include "motor/dc_motor.h"
+#include "motor/servo_motor.h"
 #include "peripheral/rgb_led.h"
 #include "peripheral/proximity_sensor.h"
 #include "net/mqtt_manager.h"
@@ -70,28 +71,16 @@ void CameraHoldState::onLoop(Context& ctx) {
 void CameraHoldState::onCommand(Context& ctx, const Command& cmd) {
     switch (cmd.type) {
         case CommandType::SORT_DIR_1L:
-        case CommandType::SORT_DIR_2L: {
-            // 큐 크기 제한
-            if ((int)ctx.dirQueue.size() >= config::queue::MAX_DIR_QUEUE_SIZE) {
-                Serial.println("[CMD] SORT_DIR rejected: queue full");
-                break;
-            }
-            SortDir dir = (cmd.type == CommandType::SORT_DIR_1L)
-                              ? SortDir::LINE_1L : SortDir::LINE_2L;
-            ctx.dirQueue.push(dir);
-            Serial.printf("[CMD] queued %s → CONVEYING (q=%d)\n",
-                dir == SortDir::LINE_1L ? "1L" : "2L", (int)ctx.dirQueue.size());
-
-            // CAMERA_HOLD 해제 → CONVEYING
+        case CommandType::SORT_DIR_2L:
+            // 로직은 PC가 관장. 디바이스는 CAMERA_HOLD 해제만 수행.
+            Serial.println("[CMD] SORT_DIR → CONVEYING");
             ctx.cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
             ctx.s6.sync(); ctx.s6Prev = ctx.s6.isDetected();
             ctx.transition(&conveyingState);
             break;
-        }
 
         case CommandType::SORT_DIR_WARN: {
-            // 미분류 상품: 큐에 넣지 않고 즉시 CONVEYING 복귀 (미분류로 통과)
-            Serial.println("[CMD] SORT_DIR:WARN → CONVEYING (no queue)");
+            Serial.println("[CMD] SORT_DIR:WARN → CONVEYING");
             ctx.cameraBlankUntil = millis() + config::timing::CAMERA_BLANK_MS;
             ctx.s6.sync(); ctx.s6Prev = ctx.s6.isDetected();
             ctx.transition(&conveyingState);
@@ -110,6 +99,27 @@ void CameraHoldState::onCommand(Context& ctx, const Command& cmd) {
             ctx.dcSpeed = constrain(cmd.value, 150, 255);
             Serial.printf("[CMD] DC_SPEED=%d (hold)\n", ctx.dcSpeed);
             break;
+
+        case CommandType::SERVO_DEG_A: {
+            int deg = constrain(cmd.value, 0, 45);
+            ctx.sortDegA = deg;
+            if (deg == 0)
+                ctx.servoA.center();
+            else
+                ctx.servoA.sort(deg);
+            Serial.printf("[CMD] SERVO_A=%d\n", deg);
+            break;
+        }
+        case CommandType::SERVO_DEG_B: {
+            int deg = constrain(cmd.value, 0, 45);
+            ctx.sortDegB = deg;
+            if (deg == 0)
+                ctx.servoB.center();
+            else
+                ctx.servoB.sort(deg);
+            Serial.printf("[CMD] SERVO_B=%d\n", deg);
+            break;
+        }
 
         default:
             break;

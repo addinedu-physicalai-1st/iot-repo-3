@@ -17,10 +17,6 @@ void Context::transition(StateBase* newState) {
 }
 
 void Context::flushAll() {
-    while (!dirQueue.empty()) dirQueue.pop();
-    servoASorting = false;
-    servoBSorting = false;
-    pending2L = 0;
     cameraBlankUntil = 0;
     dcSoftStopStartSpeed = 0;
 }
@@ -35,84 +31,44 @@ void Context::syncAllSensors() {
 }
 
 void Context::processSorters(unsigned long now) {
-    // S1: 1L 분류기 동작
+    (void)now;
+    // 센서 감지만 PC에 알림. 서보 동작은 PC가 판단 후 SERVO_A/SERVO_B 명령으로 지시.
+
+    // S1: 1L 분기 직전 — PC에만 알림 (PC가 current_item 기준으로 서보 명령 전송)
     bool det1 = s1.isDetected();
     if (det1 && !s1Prev) {
-        if (!dirQueue.empty()) {
-            SortDir dir = dirQueue.front();
-            dirQueue.pop();
-            if (dir == SortDir::LINE_1L) {
-                servoA.sort(sortDegA);
-                servoASorting = true;
-                servoAStartMs = now;
-                mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTING_1L");
-                Serial.println("[SORT] S1+1L → servoA");
-            } else if (dir == SortDir::LINE_2L) {
-                pending2L++;
-                mqtt.publish(config::mqtt::TOPIC_SENSOR, "DETECTED");
-                Serial.printf("[SORT] S1+2L → pending2L=%d\n", pending2L);
-            }
-        } else {
-            Serial.println("[WARN] S1 감지 but queue empty");
-            mqtt.publish(config::mqtt::TOPIC_SENSOR, "DETECTED");
-        }
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "S1_DETECTED");
+        Serial.println("[SENSOR] S1_DETECTED");
     }
     s1Prev = det1;
 
-    // S2: 2L 분류기 동작
+    // S2: 2L 분기 직전
     bool det2 = s2.isDetected();
     if (det2 && !s2Prev) {
-        if (pending2L > 0) {
-            pending2L--;
-            servoB.sort(sortDegB);
-            servoBSorting = true;
-            servoBStartMs = now;
-            mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTING_2L");
-            Serial.printf("[SORT] S2 → servoB (p2L=%d)\n", pending2L);
-        }
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "S2_DETECTED");
+        Serial.println("[SENSOR] S2_DETECTED");
     }
     s2Prev = det2;
 
-    // S3: 서보A 복귀 및 확인
+    // S3/S4/S5: 카운팅 센서 감지 — PC에만 알림 (PC가 1L/2L/미분류 카운팅)
     bool det3 = s3.isDetected();
-    if (det3 && !s3Prev && servoASorting) {
-        servoA.center();
-        servoASorting = false;
-        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_1L");
-        Serial.println("[CONFIRM] S3 → SORTED_1L");
+    if (det3 && !s3Prev) {
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "S3_DETECTED");
+        Serial.println("[SENSOR] S3_DETECTED");
     }
     s3Prev = det3;
 
-    // S4: 서보B 복귀 및 확인
     bool det4 = s4.isDetected();
-    if (det4 && !s4Prev && servoBSorting) {
-        servoB.center();
-        servoBSorting = false;
-        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_2L");
-        Serial.println("[CONFIRM] S4 → SORTED_2L");
+    if (det4 && !s4Prev) {
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "S4_DETECTED");
+        Serial.println("[SENSOR] S4_DETECTED");
     }
     s4Prev = det4;
 
-    // S5: 미분류 감지
     bool det5 = s5.isDetected();
     if (det5 && !s5Prev) {
-        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORTED_UNCLASSIFIED");
-        Serial.println("[CONFIRM] S5 → SORTED_UNCLASSIFIED");
+        mqtt.publish(config::mqtt::TOPIC_SENSOR, "S5_DETECTED");
+        Serial.println("[SENSOR] S5_DETECTED");
     }
     s5Prev = det5;
-
-    // Safety timeout: 서보A (3s 초과 시 원위치 + PC에 알림)
-    if (servoASorting && (now - servoAStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
-        servoA.center();
-        servoASorting = false;
-        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORT_TIMEOUT:1L");
-        Serial.println("[TIMEOUT] servoA safety return → SORT_TIMEOUT:1L");
-    }
-    // Safety timeout: 서보B (3s 초과 시 원위치 + PC에 알림)
-    if (servoBSorting && (now - servoBStartMs) >= config::timing::SORT_SAFETY_TIMEOUT_MS) {
-        servoB.center();
-        servoBSorting = false;
-        mqtt.publish(config::mqtt::TOPIC_SENSOR, "SORT_TIMEOUT:2L");
-        Serial.println("[TIMEOUT] servoB safety return → SORT_TIMEOUT:2L");
-    }
 }

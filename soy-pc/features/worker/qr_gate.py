@@ -77,8 +77,8 @@ class QrGate:
             logger.debug("[QrGate] REJECT: duplicate '%s'", code)
             return QrRejectReason.DUPLICATE
 
-        # ④ 큐 크기 제한 (1개일 때는 대체 허용 — QUEUE_FULL 반환 안 함)
-        if current_queue_size > MAX_SORT_QUEUE_SIZE:
+        # ④ 한 번에 한 개만: 이미 1개 처리 중이면 새 QR 거부 (완료 후에만 다음 허용)
+        if current_queue_size >= MAX_SORT_QUEUE_SIZE:
             logger.warning("[QrGate] REJECT: queue full (%d)", current_queue_size)
             return QrRejectReason.QUEUE_FULL
 

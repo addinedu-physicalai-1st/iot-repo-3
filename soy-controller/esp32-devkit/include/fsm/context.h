@@ -4,7 +4,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include <queue>
 #include "fsm.h"
 #include "config.h"
 
@@ -35,18 +34,12 @@ struct Context {
         : dcMotor(m), servoA(sa), servoB(sb), led(l),
           s1(ps1), s2(ps2), s3(ps3), s4(ps4), s5(ps5), s6(ps6), mqtt(mq) {}
 
-    std::queue<SortDir> dirQueue;
     int  dcSpeed    = config::dc::DEFAULT_SPEED;
     /** 위치센서(S6) 감지 시 소프트 정지: 0=비활성, >0=시작 시 속도. onLoop에서 감속 후 brake() */
     int  dcSoftStopStartSpeed = 0;
     unsigned long dcSoftStopStartMs = 0;
     int  sortDegA   = config::servo::SORT_DEG_A;
     int  sortDegB   = config::servo::SORT_DEG_B;
-    int  pending2L  = 0;
-    bool servoASorting = false;
-    bool servoBSorting = false;
-    unsigned long servoAStartMs = 0;
-    unsigned long servoBStartMs = 0;
     unsigned long cameraBlankUntil = 0;
 
     bool s1Prev = false, s2Prev = false;

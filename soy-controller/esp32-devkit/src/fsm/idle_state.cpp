@@ -2,6 +2,7 @@
 #include "fsm/conveying_state.h"
 #include "fsm/context.h"
 #include "command.h"
+#include "config.h"
 #include "motor/dc_motor.h"
 #include "motor/servo_motor.h"
 #include "peripheral/rgb_led.h"
@@ -42,20 +43,36 @@ void IdleState::onCommand(Context& ctx, const Command& cmd) {
             ctx.transition(&conveyingState);  // IDLE → CONVEYING
             break;
 
+        case CommandType::SORT_DIR_1L:
+        case CommandType::SORT_DIR_2L:
+            // 로직·큐는 PC가 관장. 디바이스는 센서만 보고, SERVO_A/B 명령만 수행.
+            break;
+
         case CommandType::DC_SPEED:
             ctx.dcSpeed = constrain(cmd.value, 150, 255);
             Serial.printf("[CMD] DC_SPEED=%d\n", ctx.dcSpeed);
             break;
 
-        case CommandType::SERVO_DEG_A:
-            ctx.sortDegA = constrain(cmd.value, 0, 45);
-            Serial.printf("[CMD] SERVO_A=%d\n", ctx.sortDegA);
+        case CommandType::SERVO_DEG_A: {
+            int deg = constrain(cmd.value, 0, 45);
+            ctx.sortDegA = deg;
+            if (deg == 0)
+                ctx.servoA.center();
+            else
+                ctx.servoA.sort(deg);
+            Serial.printf("[CMD] SERVO_A=%d\n", deg);
             break;
-
-        case CommandType::SERVO_DEG_B:
-            ctx.sortDegB = constrain(cmd.value, 0, 45);
-            Serial.printf("[CMD] SERVO_B=%d\n", ctx.sortDegB);
+        }
+        case CommandType::SERVO_DEG_B: {
+            int deg = constrain(cmd.value, 0, 45);
+            ctx.sortDegB = deg;
+            if (deg == 0)
+                ctx.servoB.center();
+            else
+                ctx.servoB.sort(deg);
+            Serial.printf("[CMD] SERVO_B=%d\n", deg);
             break;
+        }
 
         default:
             break;

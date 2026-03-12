@@ -3,22 +3,9 @@ states/active.py — ACTIVE 상태 (CONVEYING/CAMERA_HOLD/SORTING 포함).
 
 공정 진행 중. QR 3단 필터 + 독립 분류기 + 센서 이벤트 전 처리.
 
-미분류 카운팅 정책:
-  - 모든 항목(1L/2L/WARN/미인식)은 큐와 pending에 등록하여 추적
-  - 미분류 카운팅은 S5(미분류대 감지센서) 감지 시에만 수행
-  - CAMERA_TIMEOUT(QR 미인식)도 pending에 등록하여 작업자가 추적 가능
-  - S5 미감지 시 → pending에 잔류 → 작업자가 센서 이상 등 확인
-
-1L 인식했는데 미분류로 카운팅되는 경우 (원인 검토):
-  - PC는 QR 인식 시 SORT_DIR:1L을 MQTT로 보내고, ESP32는 dirQueue에 적재 후 S1 감지 시마다
-    한 개씩 꺼내 서보 동작. 따라서 두 번째 1L이 S1에 도달하기 전에 두 번째 SORT_DIR:1L이
-    ESP32에 도착해야 1L대로 분류됨. MQTT 지연/컨베이어 속도로 두 번째 물품이 S1에 먼저 도달하면
-    큐가 비어 있어 서보 미동작 → 물품이 미분류대(S5)로 낙하 → S5 감지 시 미분류 카운팅.
-  - 대응: ESP32 쪽 dirQueue 유지, 컨베이어 속도 조절, 또는 물품 간격 확보.
-
-분류 대기 정리 규칙:
-  - SORTED_UNCLASSIFIED 시: 해당 pending 제거 → station 플래그 정리
-  - 모든 SORTED_* 후: pending/queue 모두 비어있으면 station 전부 초기화
+분류 정책: 한 번에 한 개만 (dirQueue 1개).
+  - current_item 1개 완료(S3/S4/S5 감지 후 PC 카운팅) 전에는 새 QR 거부.
+  - 미분류 카운팅은 S5 감지 시 수행. CAMERA_TIMEOUT 시 current_item으로 등록.
 """
 
 from __future__ import annotations
@@ -54,16 +41,17 @@ class ActiveState(ProcessStateBase):
         from features.worker.process_controller import TOPIC_CONTROL
 
         if item_code is None or not item_code.strip():
-            controller._state.sort_queue.append(SortDirection.WARN.value)
-            controller._state.pending_items = [("(오류)", SortDirection.WARN.value)]
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            controller._state.current_item = ("(오류)", SortDirection.WARN.value)
+            controller._cb.on_current_item_updated(
+                ("(오류)", SortDirection.WARN.value),
+            )
             mqtt_client.publish(TOPIC_CONTROL, "SORT_DIR:WARN")
             controller._cb.on_qr_error("item_code 없음")
             return
 
-        # 3단 필터 검사
+        # 3단 필터 검사 (한 개 완료 전에는 새 QR 거부)
         reject = controller._qr_gate.try_accept(
-            item_code, len(controller._state.sort_queue)
+            item_code, 1 if controller._state.current_item else 0
         )
         if reject is not None:
             logger.info("[QR] 거부됨: %s (code=%s)", reject.value, item_code)
@@ -79,17 +67,14 @@ class ActiveState(ProcessStateBase):
         # QR 게이트 통과 확정
         controller._qr_gate.accept(item_code)
 
-        # 큐 + 대기 목록 등록 (최대 1개만 유지, 새 항목 시 대체)
-        controller._state.sort_queue.append(direction.value)
-        controller._state.pending_items = [(item_code, direction.value)]
-        controller._cb.on_pending_updated(list(controller._state.pending_items))
+        # 한 개만 유지 (dirQueue와 동일하게 1개)
+        controller._state.current_item = (item_code, direction.value)
+        controller._cb.on_current_item_updated((item_code, direction.value))
 
         # ESP32에 방향 전송
         mqtt_client.publish(TOPIC_CONTROL, f"SORT_DIR:{direction.value}")
         logger.info("[QR] SORT_DIR:%s (code=%s)", direction.value, item_code)
-        controller._cb.on_qr_enqueued(
-            item_code, direction.value, len(controller._state.sort_queue)
-        )
+        controller._cb.on_qr_enqueued(item_code, direction.value, 1)
 
     def handle_sensor(
         self, controller: ProcessController, payload: str, processes: list[dict]
@@ -110,85 +95,73 @@ class ActiveState(ProcessStateBase):
             )
             return
         elif event == SensorEvent.CAMERA_TIMEOUT:
-            # ★ QR 미인식 → pending에 등록하여 추적 (S5 감지 시 카운팅, 최대 1개)
-            controller._state.sort_queue.append(SortDirection.WARN.value)
-            controller._state.pending_items = [
-                ("(미인식)", SortDirection.WARN.value)
-            ]
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            # QR 미인식 → current_item 등록 (S5 감지 시 미분류 카운팅)
+            controller._state.current_item = (
+                "(미인식)",
+                SortDirection.WARN.value,
+            )
+            controller._cb.on_current_item_updated(
+                ("(미인식)", SortDirection.WARN.value),
+            )
             controller._cb.on_qr_error("카메라 타임아웃 — QR 미인식")
-            logger.info("[CAMERA_TIMEOUT] QR 미인식 → pending 등록 (S5 대기)")
+            logger.info("[CAMERA_TIMEOUT] QR 미인식 → current_item 등록 (S5 대기)")
             return
         elif event == SensorEvent.PROXIMITY_ON:
             controller._cb.on_proximity(True)
         elif event == SensorEvent.PROXIMITY_OFF:
             controller._cb.on_proximity(False)
-        elif event == SensorEvent.DETECTED:
-            self._handle_detected(controller)
-        elif event == SensorEvent.SORTING_1L:
-            controller._state.station_1l_active = True
-            if controller._state.sort_queue:
-                controller._state.sort_queue.popleft()
-            controller._cb.on_sorting_started("1L")
-        elif event == SensorEvent.SORTING_2L:
-            controller._state.station_2l_active = True
-            controller._cb.on_sorting_started("2L")
-        elif event == SensorEvent.SORTED_1L:
+        elif event == SensorEvent.S1_DETECTED:
+            self._handle_s1_detected(controller)
+        elif event == SensorEvent.S2_DETECTED:
+            self._handle_s2_detected(controller)
+        elif event == SensorEvent.S3_DETECTED:
+            logger.info("[서보1] 원위치")
+            controller._cb.on_center_servo_1l()
             controller._state.station_1l_active = False
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
             controller._cb.on_sorting_ended("1L")
-            # pending에서 첫 1L 항목 제거
-            for i, (code, d) in enumerate(controller._state.pending_items):
-                if d == "1L":
-                    controller._state.pending_items.pop(i)
-                    break
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
             self._handle_sort_result(controller, event, processes)
             self._cleanup_if_empty(controller)
-        elif event == SensorEvent.SORTED_2L:
+        elif event == SensorEvent.S4_DETECTED:
+            logger.info("[서보2] 원위치")
+            controller._cb.on_center_servo_2l()
             controller._state.station_2l_active = False
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
             controller._cb.on_sorting_ended("2L")
-            # pending에서 첫 2L 항목 제거
-            for i, (code, d) in enumerate(controller._state.pending_items):
-                if d == "2L":
-                    controller._state.pending_items.pop(i)
-                    break
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
             self._handle_sort_result(controller, event, processes)
             self._cleanup_if_empty(controller)
-        elif event == SensorEvent.SORTED_UNCLASSIFIED:
-            # ★ S5 감지 시에만 미분류 카운팅
-            removed_dir = None
-            if controller._state.pending_items:
-                popped_code, removed_dir = controller._state.pending_items.pop(0)
+        elif event == SensorEvent.S5_DETECTED:
+            removed_dir = (
+                controller._state.current_item[1]
+                if controller._state.current_item
+                else None
+            )
+            if controller._state.current_item:
                 logger.info(
-                    "[미분류] S5 감지 — pending에서 제거: code=%s direction=%s (남은 pending=%d)",
-                    popped_code,
+                    "[미분류] S5 감지 — 완료: code=%s direction=%s",
+                    controller._state.current_item[0],
                     removed_dir,
-                    len(controller._state.pending_items),
                 )
-            else:
-                logger.info(
-                    "[미분류] S5 감지 — pending 비어있음, 미분류만 카운팅 (물품이 미분류대로 낙하)"
-                )
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
 
-            # 해당 방향의 station 플래그 정리
             if removed_dir == "1L" and controller._state.station_1l_active:
-                has_more_1l = any(d == "1L" for _, d in controller._state.pending_items)
-                if not has_more_1l:
-                    controller._state.station_1l_active = False
-                    controller._cb.on_sorting_ended("1L")
-                    logger.info("[Cleanup] station_1l_active → False (미분류 통과)")
+                controller._cb.on_center_servo_1l()
+                controller._state.station_1l_active = False
+                controller._cb.on_sorting_ended("1L")
             elif removed_dir == "2L" and controller._state.station_2l_active:
-                has_more_2l = any(d == "2L" for _, d in controller._state.pending_items)
-                if not has_more_2l:
-                    controller._state.station_2l_active = False
-                    controller._cb.on_sorting_ended("2L")
-                    logger.info("[Cleanup] station_2l_active → False (미분류 통과)")
+                controller._cb.on_center_servo_2l()
+                controller._state.station_2l_active = False
+                controller._cb.on_sorting_ended("2L")
 
             self._handle_sort_result(controller, event, processes)
             self._cleanup_if_empty(controller)
-        elif event in (SensorEvent.SORT_TIMEOUT_1L, SensorEvent.SORT_TIMEOUT_2L):
+        elif event in (
+            SensorEvent.SORT_TIMEOUT_1L,
+            SensorEvent.SORT_TIMEOUT_2L,
+        ):
             self._handle_sort_timeout(controller, event, processes)
 
     def handle_status(self, controller: ProcessController, payload: str) -> None:
@@ -216,6 +189,22 @@ class ActiveState(ProcessStateBase):
             logger.warning("[Watchdog] ESP32 IDLE → re-send SORT_START")
             mqtt_client.publish(TOPIC_CONTROL, "SORT_START")
 
+    def handle_servo_timeout(
+        self,
+        controller: ProcessController,
+        station: str,
+        processes: list[dict],
+    ) -> None:
+        """서보 개방 후 2초 내 카운팅 없음 → 미분류 처리 + 자동 일시정지."""
+        from features.worker.process_controller import SensorEvent
+
+        event = (
+            SensorEvent.SORT_TIMEOUT_1L
+            if station == "1L"
+            else SensorEvent.SORT_TIMEOUT_2L
+        )
+        self._handle_sort_timeout(controller, event, processes)
+
     # ── 내부 헬퍼 ────────────────────────────────────────────
 
     @staticmethod
@@ -228,23 +217,20 @@ class ActiveState(ProcessStateBase):
         station = "1L" if event == SensorEvent.SORT_TIMEOUT_1L else "2L"
         direction = station
 
-        # station 비활성화
         if station == "1L":
+            controller._cb.on_center_servo_1l()
             controller._state.station_1l_active = False
         else:
+            controller._cb.on_center_servo_2l()
             controller._state.station_2l_active = False
         controller._cb.on_sorting_ended(station)
 
-        # pending에서 해당 방향 첫 항목 제거
-        for i, (code, d) in enumerate(controller._state.pending_items):
-            if d == direction:
-                controller._state.pending_items.pop(i)
-                break
-        controller._cb.on_pending_updated(list(controller._state.pending_items))
+        controller._state.current_item = None
+        controller._cb.on_current_item_updated(None)
 
         # 미분류 수량 증가 (DB)
         ActiveState._handle_sort_result(
-            controller, SensorEvent.SORTED_UNCLASSIFIED, processes
+            controller, SensorEvent.S5_DETECTED, processes
         )
         ActiveState._cleanup_if_empty(controller)
 
@@ -258,29 +244,44 @@ class ActiveState(ProcessStateBase):
         controller.pause()
 
     @staticmethod
-    def _handle_detected(controller: ProcessController) -> None:
-        from features.worker.classifier import SortDirection
-
-        if controller._state.sort_queue:
-            direction = controller._state.sort_queue.popleft()
-            logger.info(
-                "[Queue] DETECTED (남은: %d)", len(controller._state.sort_queue)
-            )
+    def _handle_s1_detected(controller: ProcessController) -> None:
+        """S1 감지 — PC가 current_item 기준으로 1L이면 서보A 열기."""
+        item = controller._state.current_item
+        if not item:
+            logger.warning("[S1] 감지됐으나 current_item 없음 (무시)")
+            return
+        logger.info("[S1] 1L 센서 감지")
+        direction = item[1]
+        if direction == "1L":
+            controller._state.station_1l_active = True
+            controller._cb.on_open_servo_1l()
+            controller._cb.on_sorting_started("1L")
+            logger.info("[서보1] current_item 일치, 분류개방")
         else:
-            direction = SortDirection.WARN.value
-            logger.warning("[Queue] DETECTED but queue empty")
-        controller._cb.on_detected(direction, len(controller._state.sort_queue))
+            logger.info("[서보1] current_item 불일치, 분류개방 안함")
+
+    @staticmethod
+    def _handle_s2_detected(controller: ProcessController) -> None:
+        """S2 감지 — PC가 current_item 기준으로 2L이면 서보B 열기."""
+        item = controller._state.current_item
+        if not item:
+            logger.warning("[S2] 감지됐으나 current_item 없음 (무시)")
+            return
+        logger.info("[S2] 2L 센서 감지")
+        direction = item[1]
+        if direction == "2L":
+            controller._state.station_2l_active = True
+            controller._cb.on_open_servo_2l()
+            controller._cb.on_sorting_started("2L")
+            logger.info("[서보2] current_item 일치, 분류개방")
+        else:
+            logger.info("[서보2] current_item 불일치, 분류개방 안함")
 
     @staticmethod
     def _cleanup_if_empty(controller: ProcessController) -> None:
-        """★ 분류 후 컨베이어에 물품이 없으면 station & pending 전부 초기화.
-
-        조건: pending_items 비어있음 AND sort_queue 비어있음
-        → 컨베이어에 물품이 없으므로 모든 표시 초기화.
-        이렇게 해야 서보 타임아웃 후 미분류로 빠져도 GUI '분류중' 잔류 방지.
-        """
+        """current_item 없으면 station 전부 초기화 (한 개 완료 후)."""
         state = controller._state
-        if not state.pending_items and not state.sort_queue:
+        if state.current_item is None:
             changed = False
             if state.station_1l_active:
                 state.station_1l_active = False
@@ -292,7 +293,6 @@ class ActiveState(ProcessStateBase):
                 changed = True
             if changed:
                 logger.info("[Cleanup] 컨베이어 비어있음 → station 전부 초기화")
-            controller._cb.on_pending_updated([])  # GUI 확실히 비우기
 
     @staticmethod
     def _handle_sort_result(
@@ -315,9 +315,9 @@ class ActiveState(ProcessStateBase):
             return
 
         field_map = {
-            SensorEvent.SORTED_1L: "success_1l_qty",
-            SensorEvent.SORTED_2L: "success_2l_qty",
-            SensorEvent.SORTED_UNCLASSIFIED: "unclassified_qty",
+            SensorEvent.S3_DETECTED: "success_1l_qty",
+            SensorEvent.S4_DETECTED: "success_2l_qty",
+            SensorEvent.S5_DETECTED: "unclassified_qty",
         }
         field_name = field_map.get(event)
         if field_name is None:
@@ -335,8 +335,8 @@ class ActiveState(ProcessStateBase):
         # 카운팅 시점 INFO 로그 (1L / 2L / 미분류)
         kind = (
             "1L"
-            if event == SensorEvent.SORTED_1L
-            else ("2L" if event == SensorEvent.SORTED_2L else "미분류")
+            if event == SensorEvent.S3_DETECTED
+            else ("2L" if event == SensorEvent.S4_DETECTED else "미분류")
         )
         logger.info(
             "[카운팅] pid=%s %s → %d (db_ok=%s)",
@@ -346,10 +346,10 @@ class ActiveState(ProcessStateBase):
             db_ok,
         )
 
-        if event == SensorEvent.SORTED_UNCLASSIFIED:
+        if event == SensorEvent.S5_DETECTED:
             controller._cb.on_unclassified(new_qty, db_ok)
         else:
-            kind = "1L" if event == SensorEvent.SORTED_1L else "2L"
+            kind = "1L" if event == SensorEvent.S3_DETECTED else "2L"
             controller._cb.on_sort_result(kind, new_qty, db_ok)
 
         # 자동 완료 확인

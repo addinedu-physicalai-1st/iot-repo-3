@@ -3,13 +3,12 @@
 import logging
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -243,29 +242,33 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
     )
     info_layout.addWidget(flow_label)
 
-    # ── 예상 총량 (S1 감지 기준, 카운팅 센서와 차이 확인용) ─────
+    # ── 주문 총량 / 예상 총량 / 카운팅 총량 (주문 ID 기준) ─────
+    totals_row = QHBoxLayout()
+    totals_row.setSpacing(16)
+    order_total_label = QLabel("주문 총량: —")
+    order_total_label.setStyleSheet(
+        "font-size: 12px; font-weight: bold; color: #555; border: none;"
+    )
     expected_total_label = QLabel("예상 총량: 0")
     expected_total_label.setStyleSheet(
         "font-size: 12px; font-weight: bold; color: #555; border: none;"
     )
-    info_layout.addWidget(expected_total_label)
-
-    # ── 대기 목록 ──────────────────────────────────────────────
-    pending_title = QLabel("대기 목록:")
-    pending_title.setStyleSheet(
-        "font-weight: bold; font-size: 12px; color: #555; border: none;"
+    counted_total_label = QLabel("카운팅 총량: —")
+    counted_total_label.setStyleSheet(
+        "font-size: 12px; font-weight: bold; color: #555; border: none;"
     )
-    info_layout.addWidget(pending_title)
+    totals_row.addWidget(order_total_label)
+    totals_row.addWidget(expected_total_label)
+    totals_row.addWidget(counted_total_label)
+    totals_row.addStretch()
+    info_layout.addLayout(totals_row)
 
-    pending_list = QListWidget()
-    pending_list.setMaximumHeight(80)
-    pending_list.setStyleSheet(
-        "QListWidget { background: #fff; border: 1px solid #ddd; border-radius: 4px; "
-        "font-size: 12px; } "
-        "QListWidget::item { padding: 2px 6px; }"
+    # ── 현재 항목 (current_item) ─────────────────────────────────
+    current_item_label = QLabel("현재 항목: —")
+    current_item_label.setStyleSheet(
+        "font-size: 12px; font-weight: bold; color: #333; border: none;"
     )
-    pending_list.addItem("(비어있음)")
-    info_layout.addWidget(pending_list)
+    info_layout.addWidget(current_item_label)
 
     # ── 경고 라벨 ──────────────────────────────────────────────
     warning_label = QLabel("경고: (없음)")
@@ -303,15 +306,38 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
             status_lbl.setText("\u25cf \ub300\uae30")
             status_lbl.setStyleSheet(_STATION_DOT_IDLE)
 
-    def _update_pending_list(items: list[tuple[str, str]]):
-        pending_list.clear()
-        if not items:
-            pending_list.addItem("(\ube44\uc5b4\uc788\uc74c)")
-        else:
-            for item_code, direction in items:
-                pending_list.addItem(f"{item_code}  \u2192  {direction}")
+    def _update_order_totals_ui():
+        """주문 총량·카운팅 총량 라벨 갱신 (예상 총량은 콜백으로 별도 갱신)."""
+        if not _controller.is_active:
+            order_total_label.setText("주문 총량: —")
+            counted_total_label.setText("카운팅 총량: —")
+            return
+        pid = _controller.current_pid
+        p = next(
+            (x for x in _classify_processes if x.get("process_id") == pid),
+            None,
+        )
+        if not p:
+            order_total_label.setText("주문 총량: —")
+            counted_total_label.setText("카운팅 총량: —")
+            return
+        ot = p.get("order_total_qty")
+        order_total_label.setText(
+            f"주문 총량: {ot}" if ot is not None else "주문 총량: —"
+        )
+        s1l = p.get("success_1l_qty", 0) or 0
+        s2l = p.get("success_2l_qty", 0) or 0
+        uncl = p.get("unclassified_qty", 0) or 0
+        counted_total_label.setText(f"카운팅 총량: {s1l + s2l + uncl}")
 
     _update_process_state("IDLE")
+
+    # 서보 개방 후 3초 내 카운팅 없으면 일시정지 (PC 타이머)
+    SERVO_COUNT_TIMEOUT_MS = 3000
+    timer_servo_1l = QTimer(monitor_frame)
+    timer_servo_1l.setSingleShot(True)
+    timer_servo_2l = QTimer(monitor_frame)
+    timer_servo_2l.setSingleShot(True)
 
     # ── ProcessController + UI 콜백 ──────────────────────────────
     class _UiCallbacks:
@@ -389,13 +415,47 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
         def on_sorting_ended(self, station: str) -> None:
             _update_station(station, False)
 
-        def on_pending_updated(self, items: list[tuple[str, str]]) -> None:
-            _update_pending_list(items)
+        def on_open_servo_1l(self) -> None:
+            timer_servo_1l.stop()
+            timer_servo_1l.start(SERVO_COUNT_TIMEOUT_MS)
+            mqtt_client.publish(TOPIC_CONTROL, f"SERVO_A:{servo_a_spin.value()}")
+
+        def on_open_servo_2l(self) -> None:
+            timer_servo_2l.stop()
+            timer_servo_2l.start(SERVO_COUNT_TIMEOUT_MS)
+            mqtt_client.publish(TOPIC_CONTROL, f"SERVO_B:{servo_b_spin.value()}")
+
+        def on_center_servo_1l(self) -> None:
+            timer_servo_1l.stop()
+            mqtt_client.publish(TOPIC_CONTROL, "SERVO_A:0")
+
+        def on_center_servo_2l(self) -> None:
+            timer_servo_2l.stop()
+            mqtt_client.publish(TOPIC_CONTROL, "SERVO_B:0")
+
+        def on_current_item_updated(
+            self, current_item: tuple[str, str] | None
+        ) -> None:
+            if current_item is None:
+                current_item_label.setText("현재 항목: —")
+            else:
+                code, direction = current_item
+                current_item_label.setText(f"현재 항목: {code} → {direction}")
 
         def on_expected_total_updated(self, count: int) -> None:
             expected_total_label.setText(f"예상 총량: {count}")
 
     _controller = ProcessController(_UiCallbacks())
+
+    def _on_servo_timeout(station: str) -> None:
+        if station == "1L":
+            timer_servo_1l.stop()
+        else:
+            timer_servo_2l.stop()
+        _controller.handle_servo_timeout(station, _classify_processes)
+
+    timer_servo_1l.timeout.connect(lambda: _on_servo_timeout("1L"))
+    timer_servo_2l.timeout.connect(lambda: _on_servo_timeout("2L"))
 
     # ── MQTT 브릿지 ──────────────────────────────────────────────
     mqtt_bridge = MqttSignalBridge(parent=window)
@@ -484,11 +544,15 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
 
     # ── 모니터 초기화 ────────────────────────────────────────────
     def _reset_monitor():
+        timer_servo_1l.stop()
+        timer_servo_2l.stop()
         _update_process_state("IDLE")
         _update_station("1L", False)
         _update_station("2L", False)
-        _update_pending_list([])
         expected_total_label.setText("예상 총량: 0")
+        order_total_label.setText("주문 총량: —")
+        counted_total_label.setText("카운팅 총량: —")
+        current_item_label.setText("현재 항목: —")
         warning_label.setText("경고: (없음)")
         warning_label.setStyleSheet("font-size: 12px; color: #8a8a8a; border: none;")
         dc_spin.setValue(_hw_dc_speed)
@@ -587,6 +651,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
             )
         else:
             worker.label_running_status.setText("현재 진행 중: 없음")
+        _update_order_totals_ui()
         _classify_update_toggle_button()
 
     # ── 창고 현황 ────────────────────────────────────────────────
@@ -728,6 +793,7 @@ def setup_classify_page(worker, window, stacked, stack) -> tuple:
             _controller.pause()
 
     def _on_stop_clicked():
+        _stop_udp_camera()
         row = worker.processTable.currentRow()
         item0 = worker.processTable.item(row, 0) if row >= 0 else None
         pid = item0.data(Qt.ItemDataRole.UserRole) if item0 else None

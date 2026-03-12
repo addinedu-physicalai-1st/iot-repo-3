@@ -44,6 +44,15 @@ class ProcessStateBase(ABC):
         """device/status 이벤트 처리."""
         ...
 
+    def handle_servo_timeout(
+        self,
+        controller: ProcessController,
+        station: str,
+        processes: list[dict],
+    ) -> None:
+        """서보 개방 후 N초 내 카운팅 없을 때 (PC 타이머 만료). 기본: 무시."""
+        pass
+
     @property
     @abstractmethod
     def name(self) -> str:

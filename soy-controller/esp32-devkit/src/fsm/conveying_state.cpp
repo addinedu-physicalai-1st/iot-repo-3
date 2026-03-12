@@ -21,9 +21,6 @@ void ConveyingState::onEnter(Context& ctx) {
     ctx.led.green();
     ctx.syncAllSensors();
     ctx.cameraBlankUntil = 0;
-    // 서보 분류 중이면 타임아웃 타이머 리셋 (PAUSED 복귀 후)
-    if (ctx.servoASorting) ctx.servoAStartMs = millis();
-    if (ctx.servoBSorting) ctx.servoBStartMs = millis();
     ctx.mqtt.publishStatus("RUNNING");
 }
 
@@ -72,26 +69,9 @@ void ConveyingState::onCommand(Context& ctx, const Command& cmd) {
             break;
 
         case CommandType::SORT_DIR_1L:
-            if ((int)ctx.dirQueue.size() >= config::queue::MAX_DIR_QUEUE_SIZE) {
-                Serial.println("[CMD] SORT_DIR rejected: queue full");
-                break;
-            }
-            ctx.dirQueue.push(SortDir::LINE_1L);
-            Serial.printf("[CMD] queued 1L (q=%d)\n", (int)ctx.dirQueue.size());
-            break;
-
         case CommandType::SORT_DIR_2L:
-            if ((int)ctx.dirQueue.size() >= config::queue::MAX_DIR_QUEUE_SIZE) {
-                Serial.println("[CMD] SORT_DIR rejected: queue full");
-                break;
-            }
-            ctx.dirQueue.push(SortDir::LINE_2L);
-            Serial.printf("[CMD] queued 2L (q=%d)\n", (int)ctx.dirQueue.size());
-            break;
-
         case CommandType::SORT_DIR_WARN:
-            // 미분류 상품: 큐에 넣지 않음 (서보 동작 없이 통과)
-            Serial.println("[CMD] SORT_DIR:WARN (no queue)");
+            // 로직·큐는 PC가 관장.
             break;
 
         case CommandType::DC_SPEED:
@@ -100,15 +80,26 @@ void ConveyingState::onCommand(Context& ctx, const Command& cmd) {
             Serial.printf("[CMD] DC_SPEED=%d\n", ctx.dcSpeed);
             break;
 
-        case CommandType::SERVO_DEG_A:
-            ctx.sortDegA = constrain(cmd.value, 0, 45);
-            Serial.printf("[CMD] SERVO_A=%d\n", ctx.sortDegA);
+        case CommandType::SERVO_DEG_A: {
+            int deg = constrain(cmd.value, 0, 45);
+            ctx.sortDegA = deg;
+            if (deg == 0)
+                ctx.servoA.center();
+            else
+                ctx.servoA.sort(deg);
+            Serial.printf("[CMD] SERVO_A=%d\n", deg);
             break;
-
-        case CommandType::SERVO_DEG_B:
-            ctx.sortDegB = constrain(cmd.value, 0, 45);
-            Serial.printf("[CMD] SERVO_B=%d\n", ctx.sortDegB);
+        }
+        case CommandType::SERVO_DEG_B: {
+            int deg = constrain(cmd.value, 0, 45);
+            ctx.sortDegB = deg;
+            if (deg == 0)
+                ctx.servoB.center();
+            else
+                ctx.servoB.sort(deg);
+            Serial.printf("[CMD] SERVO_B=%d\n", deg);
             break;
+        }
 
         default:
             break;

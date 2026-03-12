@@ -46,57 +46,53 @@ class PausedState(ProcessStateBase):
             controller._cb.on_proximity(True)
         elif event == SensorEvent.PROXIMITY_OFF:
             controller._cb.on_proximity(False)
-        elif event == SensorEvent.SORTED_1L:
+        elif event == SensorEvent.S3_DETECTED:
+            logger.info("[서보1] 원위치")
+            controller._cb.on_center_servo_1l()
             controller._state.station_1l_active = False
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
             controller._cb.on_sorting_ended("1L")
-            for i, (code, d) in enumerate(controller._state.pending_items):
-                if d == "1L":
-                    controller._state.pending_items.pop(i)
-                    break
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
             ActiveState._handle_sort_result(controller, event, processes)
             ActiveState._cleanup_if_empty(controller)
-        elif event == SensorEvent.SORTED_2L:
+        elif event == SensorEvent.S4_DETECTED:
+            logger.info("[서보2] 원위치")
+            controller._cb.on_center_servo_2l()
             controller._state.station_2l_active = False
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
             controller._cb.on_sorting_ended("2L")
-            for i, (code, d) in enumerate(controller._state.pending_items):
-                if d == "2L":
-                    controller._state.pending_items.pop(i)
-                    break
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
             ActiveState._handle_sort_result(controller, event, processes)
             ActiveState._cleanup_if_empty(controller)
-        elif event == SensorEvent.SORTED_UNCLASSIFIED:
-            removed_dir = None
-            if controller._state.pending_items:
-                _, removed_dir = controller._state.pending_items.pop(0)
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
+        elif event == SensorEvent.S5_DETECTED:
+            removed_dir = (
+                controller._state.current_item[1]
+                if controller._state.current_item
+                else None
+            )
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
             if removed_dir == "1L" and controller._state.station_1l_active:
-                has_more_1l = any(d == "1L" for _, d in controller._state.pending_items)
-                if not has_more_1l:
-                    controller._state.station_1l_active = False
-                    controller._cb.on_sorting_ended("1L")
+                controller._state.station_1l_active = False
+                controller._cb.on_sorting_ended("1L")
             elif removed_dir == "2L" and controller._state.station_2l_active:
-                has_more_2l = any(d == "2L" for _, d in controller._state.pending_items)
-                if not has_more_2l:
-                    controller._state.station_2l_active = False
-                    controller._cb.on_sorting_ended("2L")
+                controller._state.station_2l_active = False
+                controller._cb.on_sorting_ended("2L")
             ActiveState._handle_sort_result(controller, event, processes)
             ActiveState._cleanup_if_empty(controller)
         elif event in (SensorEvent.SORT_TIMEOUT_1L, SensorEvent.SORT_TIMEOUT_2L):
             station = "1L" if event == SensorEvent.SORT_TIMEOUT_1L else "2L"
             if station == "1L":
+                controller._cb.on_center_servo_1l()
                 controller._state.station_1l_active = False
             else:
+                controller._cb.on_center_servo_2l()
                 controller._state.station_2l_active = False
+            controller._state.current_item = None
+            controller._cb.on_current_item_updated(None)
             controller._cb.on_sorting_ended(station)
-            for i, (code, d) in enumerate(controller._state.pending_items):
-                if d == station:
-                    controller._state.pending_items.pop(i)
-                    break
-            controller._cb.on_pending_updated(list(controller._state.pending_items))
             ActiveState._handle_sort_result(
-                controller, SensorEvent.SORTED_UNCLASSIFIED, processes
+                controller, SensorEvent.S5_DETECTED, processes
             )
             ActiveState._cleanup_if_empty(controller)
             controller._cb.on_qr_error(
