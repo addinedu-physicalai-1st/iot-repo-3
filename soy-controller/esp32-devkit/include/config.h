@@ -46,7 +46,7 @@ namespace servo {
 }
 
 namespace sensor {
-    constexpr int           THRESHOLD    = 600;
+    constexpr int           THRESHOLD    = 800;
     constexpr int           THRESHOLD_S6 = 3600;
     constexpr unsigned long DEBOUNCE_MS  = 50;
     constexpr unsigned long DEBOUNCE_S6_MS = 10;
